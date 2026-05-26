@@ -235,7 +235,7 @@ def enrich_camera_items(
     if with_inference:
         from services.inference_container_service import attach_inference_status
 
-        return attach_inference_status(result)
+        return attach_inference_status(result, cgroup_stats=False)
     return result
 
 

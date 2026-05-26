@@ -12,6 +12,6 @@ COPY core ./core
 COPY inference_worker.py ./inference_worker.py
 COPY docker/app_config.inference-gpu.json ./app_config.json
 
-ENV INFERENCE_BACKEND=mediapipe
+ENV INFERENCE_BACKEND=mmpose
 
 CMD ["python", "inference_worker.py"]

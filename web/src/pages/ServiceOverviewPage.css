@@ -1,0 +1,111 @@
+.svc-page {
+  padding: 0 0 2rem;
+}
+
+.svc-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.svc-header h1 {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 600;
+}
+
+.svc-refresh {
+  padding: 0.35rem 0.85rem;
+  border: 1px solid var(--border, #ccc);
+  border-radius: 6px;
+  background: var(--surface, #fff);
+  cursor: pointer;
+}
+
+.svc-section {
+  margin-bottom: 1.5rem;
+}
+
+.svc-section h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.svc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.svc-table th,
+.svc-table td {
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--border, #e5e5e5);
+  text-align: left;
+  vertical-align: top;
+}
+
+.svc-table th {
+  color: var(--muted, #666);
+  font-weight: 500;
+}
+
+.svc-msg {
+  max-width: 280px;
+  word-break: break-word;
+}
+
+.svc-host {
+  margin: 0 0 1rem;
+  font-size: 0.875rem;
+  color: var(--muted, #666);
+}
+
+.svc-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.75rem;
+  color: var(--muted, #888);
+}
+
+.svc-table--infer {
+  font-size: 0.8125rem;
+}
+
+.svc-error {
+  color: #c62828;
+  margin: 0 0 1rem;
+}
+
+.svc-ok {
+  color: #2e7d32;
+}
+
+.svc-fail {
+  color: #c62828;
+}
+
+.svc-badge {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  background: #eee;
+}
+
+.svc-badge--running {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.svc-badge--error {
+  background: #ffebee;
+  color: #c62828;
+}
+
+.svc-badge--starting {
+  background: #fff8e1;
+  color: #f57f17;
+}

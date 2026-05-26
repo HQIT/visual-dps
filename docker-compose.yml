@@ -74,7 +74,7 @@ services:
       - INFERENCE_LITE_IMAGE=${INFERENCE_LITE_IMAGE:-visual-dps-inference-lite:latest}
       - INFERENCE_LITE_GPU_IMAGE=${INFERENCE_LITE_GPU_IMAGE:-visual-dps-inference-lite-gpu:latest}
       - INFERENCE_USE_GPU=${INFERENCE_USE_GPU:-0}
-      - INFERENCE_BACKEND=${INFERENCE_BACKEND:-mediapipe}
+      - INFERENCE_BACKEND=${INFERENCE_BACKEND:-rtmpose_onnx}
       - INFERENCE_JSON_PATH=localdata/json/precise_boxes_new.json
       - INFERENCE_STATUS_DIR=/app/localdata/inference
       - LOG_DB_PATH=/app/localdata/logs/visual_dps.db

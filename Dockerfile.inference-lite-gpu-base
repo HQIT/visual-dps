@@ -9,7 +9,6 @@ ARG PIP_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
 ARG GITHUB_PROXY_BASE=https://ghfast.top
-ARG MEDIAPIPE_MODEL_URL=https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task
 ARG RTMPOSE_ONNX_DET_ZIP=https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/rtmdet_nano_8xb32-100e_coco-obj365-person-05d8511e.zip
 ARG RTMPOSE_ONNX_POSE_ZIP=https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/rtmpose-t_simcc-body7_pt-body7_420e-256x192-026a1439_20230504.zip
 ARG MMDET_CKPT_URL=https://download.openmmlab.com/mmpose/v1/projects/rtmpose/rtmdet_m_8xb32-100e_coco-obj365-person-235e8209.pth
@@ -59,10 +58,9 @@ ENV LD_LIBRARY_PATH=/usr/lib/jellyfin-ffmpeg/lib:${LD_LIBRARY_PATH} \
     FFMPEG_BIN=/usr/local/bin/ffmpeg
 
 COPY docker/pip-install.sh /tmp/pip-install.sh
-RUN sh /tmp/pip-install.sh "${PIP_INDEX}" --upgrade pip setuptools wheel \
+RUN sh /tmp/pip-install.sh "${PIP_INDEX}" --upgrade pip "setuptools<81" wheel \
     && sh /tmp/pip-install.sh "${PIP_INDEX}" "numpy<2" \
     && sh /tmp/pip-install.sh "${PIP_INDEX}" \
-        mediapipe \
         rtmlib \
         opencv-python-headless \
         fastapi \
@@ -113,11 +111,9 @@ for p in (det_dst, pose_src):
 print("MMPose config paths: OK")
 PY
 
-RUN mkdir -p /app/localdata/models/pose_landmarker \
-    /app/localdata/models/rtmpose_onnx/rtmdet_nano \
+RUN mkdir -p /app/localdata/models/rtmpose_onnx/rtmdet_nano \
     /app/localdata/models/rtmpose_onnx/rtmpose_t \
     /app/localdata/models/mmpose \
-    && wget -q -O /app/localdata/models/pose_landmarker_lite.task "${MEDIAPIPE_MODEL_URL}" \
     && wget -q -O /tmp/rtmdet_nano.zip "${RTMPOSE_ONNX_DET_ZIP}" \
     && unzip -q -j /tmp/rtmdet_nano.zip '*/end2end.onnx' -d /app/localdata/models/rtmpose_onnx/rtmdet_nano \
     && wget -q -O /tmp/rtmpose_t.zip "${RTMPOSE_ONNX_POSE_ZIP}" \

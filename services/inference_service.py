@@ -114,6 +114,63 @@ def _collect_resource_debug_line(device_name: str) -> str:
     return " ".join(parts)
 
 
+def collect_runtime_metrics(
+    device_name: str,
+    *,
+    fps: float = 0.0,
+    frame_idx: int = 0,
+) -> dict:
+    """推理进程运行时指标，写入 status.json 供服务总览展示。"""
+    out: dict = {
+        "fps": round(float(fps), 1),
+        "frame_idx": int(frame_idx),
+    }
+    if psutil is not None:
+        try:
+            out["cpu_percent"] = round(psutil.cpu_percent(interval=None), 1)
+        except Exception:
+            pass
+        try:
+            out["memory_mb"] = round(
+                psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024), 1
+            )
+        except Exception:
+            pass
+
+    gpu_idx = _parse_cuda_device_index(device_name)
+    if torch is not None and torch.cuda.is_available():
+        try:
+            out["gpu_memory_mb"] = round(
+                torch.cuda.memory_allocated(gpu_idx) / (1024 * 1024), 1
+            )
+        except Exception:
+            pass
+
+    try:
+        smi = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=utilization.gpu,memory.used",
+                "--format=csv,noheader,nounits",
+                "-i",
+                str(gpu_idx),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=0.4,
+            check=False,
+        )
+        if smi.returncode == 0 and smi.stdout.strip():
+            cols = [c.strip() for c in smi.stdout.strip().splitlines()[0].split(",")]
+            if len(cols) >= 2:
+                out["gpu_util_percent"] = float(cols[0])
+                out["gpu_memory_used_mb"] = float(cols[1])
+    except Exception:
+        pass
+
+    return out
+
+
 def _compute_infer_resolution(source_w: int, source_h: int, target_height: int):
     target_h = max(120, int(target_height))
     if source_h <= target_h:
@@ -172,6 +229,7 @@ class InferenceService:
         self._perception_backend = None
         self._background_task = None
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="inference")
+        self.runtime_metrics: dict = {}
 
     def debug_visualization_enabled(self) -> bool:
         debug_cfg = self.app_config.get("debug-info", {})
@@ -483,6 +541,11 @@ class InferenceService:
 
                 elapsed = time.time() - start_time
                 current_fps = frame_count / elapsed if elapsed > 0 else 0
+                self.runtime_metrics = collect_runtime_metrics(
+                    self.app_config.get("models", {}).get("device", ""),
+                    fps=current_fps,
+                    frame_idx=frame_count,
+                )
 
                 video_time_sec = frame_count / video_fps
                 m, s = int(video_time_sec // 60), int(video_time_sec % 60)

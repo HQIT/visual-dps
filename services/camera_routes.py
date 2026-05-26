@@ -47,6 +47,7 @@ from services.annotation_service import (
 )
 from services.runtime_config_service import get_camera_settings_payload
 from services.matrix_service import build_matrix_overview
+from services.system_overview_service import build_services_overview
 
 
 def register_camera_routes(
@@ -78,6 +79,14 @@ def register_camera_routes(
             frames_dir=frames_dir,
         )
 
+    @router.get("/services/overview")
+    async def services_overview(probe: bool = False):
+        return build_services_overview(
+            camera_ips_file,
+            frames_dir,
+            probe_online=probe,
+        )
+
     def _attach_list_items(result: dict, *, probe: bool = False) -> dict:
         if result.get("status") == "success":
             result["items"] = list_cameras_with_status(
@@ -107,7 +116,7 @@ def register_camera_routes(
         cam["has_thumbnail"] = thumb_path is not None
         from services.inference_container_service import attach_inference_status
 
-        enriched = attach_inference_status([cam])
+        enriched = attach_inference_status([cam], cgroup_stats=False)
         cam_out = enriched[0]
         if settings:
             settings_payload = get_camera_settings_payload(try_load_app_config(), cam_out)

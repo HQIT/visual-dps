@@ -117,6 +117,36 @@ def mediamtx_path_ready(path: str) -> bool:
         return False
 
 
+def list_mediamtx_paths_summary() -> dict:
+    """MediaMTX path 列表摘要，供服务总览使用。"""
+    if not MEDIAMTX_API_URL:
+        return {"ok": False, "message": "MediaMTX API 未配置", "paths": []}
+    try:
+        data = _mediamtx_api("GET", "/v3/paths/list?itemsPerPage=200")
+        items = data.get("items") or []
+        paths = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            if not name:
+                continue
+            paths.append(
+                {
+                    "name": name,
+                    "ready": bool(item.get("ready")),
+                    "source_type": item.get("source", {}).get("type")
+                    if isinstance(item.get("source"), dict)
+                    else item.get("source"),
+                    "readers": len(item.get("readers") or []),
+                }
+            )
+        paths.sort(key=lambda p: p["name"])
+        return {"ok": True, "paths": paths}
+    except Exception as exc:
+        return {"ok": False, "message": str(exc), "paths": []}
+
+
 def mediamtx_path_ready_for_camera(camera: dict) -> bool:
     if not is_mediamtx_playback_available(camera):
         return False

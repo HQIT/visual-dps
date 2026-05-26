@@ -181,7 +181,11 @@ def build_matrix_overview(
     frames_dir: str = "",
 ) -> dict[str, Any]:
     items = list_cameras_with_status(camera_ips_file, frames_dir, probe_online=False)
-    enriched = {c.get("id"): c for c in attach_inference_status(items) if c.get("id")}
+    enriched = {
+        c.get("id"): c
+        for c in attach_inference_status(items, cgroup_stats=False)
+        if c.get("id")
+    }
 
     cameras_out: list[dict] = []
     for cam in items:

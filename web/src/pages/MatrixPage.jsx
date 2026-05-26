@@ -4,7 +4,7 @@ import { apiGet } from '../api/client';
 import { formatUserError } from '../lib/userFacingText';
 import './MatrixPage.css';
 
-const POLL_MS = 1500;
+const POLL_MS = 5000;
 
 const STATE_META = {
   empty: { label: '空', className: 'cell-empty' },

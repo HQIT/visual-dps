@@ -25,6 +25,9 @@ export default function AppNav() {
         <NavLink to="/matrix">
           事件矩阵
         </NavLink>
+        <NavLink to="/services">
+          服务总览
+        </NavLink>
         </div>
       </div>
       {authRequired && user && (

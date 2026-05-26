@@ -7,6 +7,7 @@ const ROUTE_TITLES = {
   '/login': '登录',
   '/': '摄像头总览',
   '/matrix': '事件矩阵',
+  '/services': '服务总览',
   '/monitor': '检测监控',
   '/settings': '系统设置',
 };

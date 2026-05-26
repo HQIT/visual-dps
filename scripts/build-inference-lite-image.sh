@@ -10,7 +10,7 @@ docker compose --profile build-only build visual-dps-inference-lite
 
 echo ""
 echo "完成。启动 UI 并指定轻量推理镜像："
-echo "  INFERENCE_IMAGE=visual-dps-inference-lite:latest INFERENCE_BACKEND=mediapipe \\"
+echo "  INFERENCE_IMAGE=visual-dps-inference-lite:latest INFERENCE_BACKEND=rtmpose_onnx \\"
 echo "    docker compose --profile ui up -d visual-dps-ui"
 echo ""
-echo "或在 app_config.json / 摄像头配置中设置 models.backend 为 mediapipe 或 rtmpose_onnx。"
+echo "或在 app_config.json / 摄像头配置中设置 models.backend 为 rtmpose_onnx 或 mmpose。"

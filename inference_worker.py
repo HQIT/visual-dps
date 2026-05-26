@@ -57,6 +57,9 @@ _STATUS_PRESERVE_KEYS = (
     "skeletons",
     "infer_width",
     "infer_height",
+    "stats",
+    "stream_url",
+    "started_at",
 )
 
 
@@ -150,13 +153,14 @@ async def _run_worker():
             if not STATE.is_inferencing:
                 write_status(base_dir, camera_id, "stopped", "推理任务已结束")
                 break
-        write_status(
-            base_dir,
-            camera_id,
-            "running",
-            "",
-            {"stream_url": stream_url, "is_inferencing": STATE.is_inferencing},
-        )
+        extra = {
+            "stream_url": stream_url,
+            "is_inferencing": STATE.is_inferencing,
+        }
+        metrics = getattr(service, "runtime_metrics", None)
+        if isinstance(metrics, dict) and metrics:
+            extra["stats"] = dict(metrics)
+        write_status(base_dir, camera_id, "running", "", extra)
         await asyncio.sleep(3)
 
     if not stopping:

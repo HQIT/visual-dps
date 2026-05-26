@@ -9,6 +9,7 @@ import AnnotatePage from './pages/AnnotatePage';
 import LoginPage from './pages/LoginPage';
 import SettingsPage from './pages/SettingsPage';
 import MatrixPage from './pages/MatrixPage';
+import ServiceOverviewPage from './pages/ServiceOverviewPage';
 
 export default function App() {
   return (
@@ -25,6 +26,7 @@ export default function App() {
         >
           <Route path="/" element={<DashboardPage />} />
           <Route path="/matrix" element={<MatrixPage />} />
+          <Route path="/services" element={<ServiceOverviewPage />} />
           <Route path="/monitor" element={<MonitorPage />} />
         <Route path="/annotate" element={<AnnotatePage />} />
         <Route path="/settings" element={<SettingsPage />} />

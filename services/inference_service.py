@@ -31,12 +31,107 @@ from services.inference_backends import create_inference_backend, resolve_backen
 from services.rtsp_capture import open_rtsp_capture
 
 
-def _read_stream_frame(cap):
-    return cap.read_frame()
+def _read_stream_frame(cap, timeout_sec: float | None = None):
+    return cap.read_frame(timeout_sec)
 
 
 def _discard_stream_frame(cap) -> None:
+    # 跳帧丢弃：失败不触发重连（旧行为），避免偶发超时导致 2s 重连卡顿
     cap.read_frame()
+
+
+def _release_stream_capture(cap) -> None:
+    if cap is not None:
+        try:
+            cap.release()
+        except Exception:
+            pass
+
+
+def _stream_reconnect_settings(infer_cfg: dict) -> tuple[bool, float, int, int]:
+    """网络流读帧失败时是否等待并重连 RTSP。max_attempts=0 表示不限次数。"""
+    raw = os.environ.get("RTSP_RECONNECT_ENABLED", "").strip().lower()
+    if raw in ("0", "false", "no", "off"):
+        enabled = False
+    elif raw in ("1", "true", "yes", "on"):
+        enabled = True
+    else:
+        enabled = bool(infer_cfg.get("stream_reconnect", True))
+
+    try:
+        wait_sec = float(
+            os.environ.get("RTSP_RECONNECT_WAIT_SEC")
+            or infer_cfg.get("stream_reconnect_wait_sec", 1)
+            or 1
+        )
+    except (TypeError, ValueError):
+        wait_sec = 1.0
+    wait_sec = max(0.0, wait_sec)
+
+    try:
+        max_attempts = int(
+            os.environ.get("RTSP_RECONNECT_MAX_ATTEMPTS")
+            or infer_cfg.get("stream_reconnect_max_attempts", 0)
+            or 0
+        )
+    except (TypeError, ValueError):
+        max_attempts = 0
+    max_attempts = max(0, max_attempts)
+
+    try:
+        fail_streak = int(
+            os.environ.get("RTSP_RECONNECT_FAIL_STREAK")
+            or infer_cfg.get("stream_reconnect_fail_streak", 30)
+            or 30
+        )
+    except (TypeError, ValueError):
+        fail_streak = 30
+    fail_streak = max(3, fail_streak)
+    return enabled, wait_sec, max_attempts, fail_streak
+
+
+async def _reopen_rtsp_capture(executor: ThreadPoolExecutor, url: str, buffer_size: int):
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        executor,
+        lambda: open_rtsp_capture(url, buffer_size=buffer_size),
+    )
+
+
+async def _wait_and_reconnect_rtsp(
+    *,
+    executor: ThreadPoolExecutor,
+    cap,
+    url: str,
+    buffer_size: int,
+    wait_sec: float,
+    max_attempts: int,
+    should_continue,
+) -> object | None:
+    _release_stream_capture(cap)
+    attempt = 0
+    while should_continue():
+        attempt += 1
+        if max_attempts > 0 and attempt > max_attempts:
+            print(f"⚠️ RTSP 重连已达上限 {max_attempts} 次，停止推理")
+            return None
+        if attempt > 1 and wait_sec > 0:
+            if max_attempts == 0:
+                print(f"⚠️ RTSP 重连失败，{wait_sec:.1f}s 后第 {attempt} 次重试…")
+            else:
+                print(
+                    f"⚠️ RTSP 重连失败，{wait_sec:.1f}s 后重试 ({attempt}/{max_attempts})…"
+                )
+            await asyncio.sleep(wait_sec)
+        elif attempt == 1:
+            print("⚠️ RTSP 连续读帧失败，立即尝试重连…")
+        try:
+            new_cap = await _reopen_rtsp_capture(executor, url, buffer_size)
+            print("✅ RTSP 重连成功，继续推理")
+            return new_cap
+        except Exception as exc:
+            print(f"⚠️ RTSP 重连失败: {exc}")
+    return None
 
 
 def _parse_cuda_device_index(device_name: str) -> int:
@@ -376,14 +471,52 @@ class InferenceService:
             debug_interval_frames = 30
         debug_interval_frames = max(1, debug_interval_frames)
 
+        stream_reconnect_enabled = False
+        reconnect_wait_sec = 1.0
+        reconnect_max_attempts = 0
+        reconnect_fail_streak = 30
+        stream_rtsp_url = ""
+        read_timeout_sec = 1.0
+        read_retry_timeout_sec = 0.35
+        if is_stream:
+            try:
+                read_timeout_sec = float(os.environ.get("RTSP_READ_TIMEOUT_SEC", "1.0") or 1.0)
+            except (TypeError, ValueError):
+                read_timeout_sec = 1.0
+            read_timeout_sec = max(0.2, read_timeout_sec)
+            try:
+                read_retry_timeout_sec = float(
+                    os.environ.get("RTSP_READ_RETRY_TIMEOUT_SEC", "0.35") or 0.35
+                )
+            except (TypeError, ValueError):
+                read_retry_timeout_sec = 0.35
+            read_retry_timeout_sec = max(0.1, min(read_retry_timeout_sec, read_timeout_sec))
+            (
+                stream_reconnect_enabled,
+                reconnect_wait_sec,
+                reconnect_max_attempts,
+                reconnect_fail_streak,
+            ) = _stream_reconnect_settings(infer_cfg)
+            stream_rtsp_url = self.state.video_path
+
         print(
             f"ℹ️ 推理参数: source={stream_w}x{stream_h} height={infer_h} "
             f"frame_rate={frame_rate} pose_frame_interval={pose_frame_interval} "
             f"resize={'on' if resize_needed else 'off'}"
         )
+        if is_stream:
+            reconnect_note = (
+                f"wait={reconnect_wait_sec:.1f}s max={reconnect_max_attempts or '∞'} "
+                f"streak={reconnect_fail_streak}"
+            )
+            print(
+                f"ℹ️ RTSP 断流: reconnect={'on' if stream_reconnect_enabled else 'off'} "
+                f"({reconnect_note})"
+            )
 
         start_time = time.time()
         frame_count = 0
+        read_fail_streak = 0
         last_frame_started_at = time.monotonic()
 
         cached_bboxes = np.empty((0, 4), dtype=np.float32)
@@ -394,7 +527,10 @@ class InferenceService:
         headless_stream = is_stream and is_null_ws
 
         try:
-            while cap.isOpened() and self.state.is_inferencing:
+            while self.state.is_inferencing:
+                if not is_stream and not cap.isOpened():
+                    break
+
                 loop_started_at = time.monotonic()
 
                 if headless_stream and (frame_count % pose_frame_interval) != 0:
@@ -409,8 +545,12 @@ class InferenceService:
                     continue
 
                 if is_stream:
-                    ret, frame, _captured_at = await asyncio.get_running_loop().run_in_executor(
-                        self._executor, _read_stream_frame, cap
+                    loop = asyncio.get_running_loop()
+                    ret, frame, _captured_at = await loop.run_in_executor(
+                        self._executor,
+                        _read_stream_frame,
+                        cap,
+                        read_timeout_sec,
                     )
                 else:
                     ret, frame = await asyncio.get_running_loop().run_in_executor(
@@ -418,10 +558,41 @@ class InferenceService:
                     )
 
                 if not ret or frame is None:
+                    if is_stream:
+                        # 短超时快速重试一次，避免把 5s 等待算进主循环
+                        ret, frame, _captured_at = await asyncio.get_running_loop().run_in_executor(
+                            self._executor,
+                            _read_stream_frame,
+                            cap,
+                            read_retry_timeout_sec,
+                        )
+                    if not ret or frame is None:
+                        if is_stream:
+                            read_fail_streak += 1
+                            if (
+                                stream_reconnect_enabled
+                                and read_fail_streak >= reconnect_fail_streak
+                            ):
+                                cap = await _wait_and_reconnect_rtsp(
+                                    executor=self._executor,
+                                    cap=cap,
+                                    url=stream_rtsp_url,
+                                    buffer_size=stream_buffer_size,
+                                    wait_sec=reconnect_wait_sec,
+                                    max_attempts=reconnect_max_attempts,
+                                    should_continue=lambda: self.state.is_inferencing,
+                                )
+                                read_fail_streak = 0
+                                if cap is None:
+                                    self.state.is_inferencing = False
+                                    break
+                                continue
+                            continue
                     print("✅ 视频推理完成，停止当前会话")
                     self.state.is_inferencing = False
                     break
 
+                read_fail_streak = 0
                 frame_count += 1
                 if resize_needed:
                     raw_frame = cv2.resize(frame, (infer_w, infer_h), interpolation=cv2.INTER_AREA)

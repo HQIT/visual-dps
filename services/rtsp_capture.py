@@ -134,10 +134,12 @@ class PyAvRtspCapture:
             return float(self._fps)
         return 0.0
 
-    def read_frame(self) -> Tuple[bool, np.ndarray | None, float]:
+    def read_frame(self, timeout_sec: float | None = None) -> Tuple[bool, np.ndarray | None, float]:
         if not self.isOpened() or self._decoder is None:
             return False, None, time.time()
-        deadline = time.time() + float(os.environ.get("RTSP_READ_TIMEOUT_SEC", "5"))
+        if timeout_sec is None:
+            timeout_sec = float(os.environ.get("RTSP_READ_TIMEOUT_SEC", "1.0"))
+        deadline = time.time() + max(0.1, float(timeout_sec))
         while time.time() < deadline:
             try:
                 frame = next(self._decoder)

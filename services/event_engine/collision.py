@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import dataclass
 
 import cv2
@@ -64,15 +65,23 @@ class CollisionProcessor:
         *,
         alarm_min_consecutive_frames: int = 3,
         alarm_cooldown_frames: int = 12,
+        alarm_min_consecutive_sec: float = 0.0,
+        alarm_cooldown_sec: float = 0.0,
         video_fps: float = 25.0,
     ):
         self.boxes = boxes
         self.alarm_min_consecutive_frames = max(1, int(alarm_min_consecutive_frames))
         self.alarm_cooldown_frames = max(1, int(alarm_cooldown_frames))
+        self.alarm_min_consecutive_sec = max(0.0, float(alarm_min_consecutive_sec))
+        self.alarm_cooldown_sec = max(0.0, float(alarm_cooldown_sec))
+        self.use_alarm_time = self.alarm_min_consecutive_sec > 0
+        self.use_cooldown_time = self.alarm_cooldown_sec > 0
         self.video_fps = max(1.0, float(video_fps))
         self.person_assigner = PersonTrackAssigner(max_match_dist=220.0, stale_sec=1.2)
         self._box_consecutive_hits: dict[str, int] = {}
         self._box_last_alarm_frame: dict[str, int] = {}
+        self._box_hit_start_mono: dict[str, float] = {}
+        self._box_last_alarm_mono: dict[str, float] = {}
 
     def process(self, pose_frame: dict) -> dict:
         """返回 collisions、alarm_collisions、带 track 的 skeletons（供 SSE 合并）。"""
@@ -135,11 +144,49 @@ class CollisionProcessor:
         active_collisions = list(set(active_collisions))
         current_tokens = set(active_collisions)
 
+        alarm_collisions = self._evaluate_alarms(current_tokens, frame_idx)
+
+        return {
+            "collisions": active_collisions,
+            "alarm_collisions": alarm_collisions,
+            "skeletons": skeletons_data,
+            "frame_idx": frame_idx,
+        }
+
+    def _evaluate_alarms(self, current_tokens: set[str], frame_idx: int) -> list[str]:
+        """告警门控：alarm_min_consecutive_sec>0 时用时间门控，否则按连续帧计数。"""
+        alarm_collisions: list[str] = []
+
+        if self.use_alarm_time:
+            now_mono = time.monotonic()
+            for token in list(self._box_hit_start_mono.keys()):
+                if token not in current_tokens:
+                    self._box_hit_start_mono.pop(token, None)
+            for token in current_tokens:
+                if token not in self._box_hit_start_mono:
+                    self._box_hit_start_mono[token] = now_mono
+                held_sec = now_mono - self._box_hit_start_mono[token]
+                if held_sec < self.alarm_min_consecutive_sec:
+                    continue
+                if self.use_cooldown_time:
+                    last_m = self._box_last_alarm_mono.get(token, -10**9)
+                    if now_mono - last_m < self.alarm_cooldown_sec:
+                        continue
+                else:
+                    last_f = self._box_last_alarm_frame.get(token, -10**9)
+                    if frame_idx - last_f < self.alarm_cooldown_frames:
+                        continue
+                alarm_collisions.append(token)
+                self._box_last_alarm_frame[token] = frame_idx
+                self._box_last_alarm_mono[token] = now_mono
+                # 冷却结束后重新累计连续命中时长，避免连发
+                self._box_hit_start_mono[token] = now_mono
+            return alarm_collisions
+
         for token in list(self._box_consecutive_hits.keys()):
             if token not in current_tokens:
                 self._box_consecutive_hits[token] = 0
 
-        alarm_collisions: list[str] = []
         for token in current_tokens:
             self._box_consecutive_hits[token] = self._box_consecutive_hits.get(token, 0) + 1
             last_alarm = self._box_last_alarm_frame.get(token, -10**9)
@@ -150,9 +197,4 @@ class CollisionProcessor:
                 alarm_collisions.append(token)
                 self._box_last_alarm_frame[token] = frame_idx
 
-        return {
-            "collisions": active_collisions,
-            "alarm_collisions": alarm_collisions,
-            "skeletons": skeletons_data,
-            "frame_idx": frame_idx,
-        }
+        return alarm_collisions

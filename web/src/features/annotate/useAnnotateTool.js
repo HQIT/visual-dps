@@ -70,6 +70,8 @@ export function useAnnotateTool(canvasRef, options = {}) {
     streamOverlay = false,
     /** 监控页标注 canvas 随 Tab 挂载/卸载，需为 true 时才绑定指针事件 */
     canvasActive = true,
+    /** 从 HLS/WebRTC 预览 video 抓帧，返回 base64（不含 data: 前缀） */
+    getBrowserCapture = null,
   } = options;
   const fixedCameraRef = useRef(fixedCamera);
   fixedCameraRef.current = fixedCamera;
@@ -1402,7 +1404,23 @@ export function useAnnotateTool(canvasRef, options = {}) {
     setStatus('正在通过摄像头抓取一帧...', 'warn');
 
     try {
-      const data = await apiPost('/api/get_camera_frame', { url });
+      let imagePayload = '';
+      if (typeof getBrowserCapture === 'function') {
+        try {
+          imagePayload = getBrowserCapture();
+        } catch (capErr) {
+          setStatus(
+            `摄像头抓帧失败：${formatUserError(capErr.message) || '请先在实时监控页等待画面加载'}`,
+            'err',
+          );
+          return;
+        }
+      }
+      if (!imagePayload) {
+        setStatus('请先在「实时监控」等待画面加载后再抓帧', 'err');
+        return;
+      }
+      const data = await apiPost('/api/get_camera_frame', { url, image: imagePayload });
       if (data?.error || !data?.image) {
         setStatus(`摄像头抓帧失败：${formatUserError(data?.error) || '未知错误'}`, 'err');
         return;
@@ -1423,6 +1441,7 @@ export function useAnnotateTool(canvasRef, options = {}) {
       setStatus(`摄像头抓帧失败：${formatUserError(err.message) || '无法连接服务器'}`, 'err');
     }
   }, [
+    getBrowserCapture,
     getCameraUrlFromUI,
     resetAnnotationSession,
     setStatus,

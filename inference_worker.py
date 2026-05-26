@@ -13,6 +13,18 @@ from services.inference_backends import resolve_backend_name
 from services.inference_service import InferenceService
 
 
+def _apply_gpu_overrides(app_config: dict) -> None:
+    """GPU 镜像/环境启用时，将仍为 CPU 默认的设备参数切到 CUDA。"""
+    if os.environ.get("INFERENCE_USE_GPU", "0") != "1":
+        return
+    models = app_config.setdefault("models", {})
+    if str(models.get("rtmpose_onnx_device") or "cpu").strip().lower() == "cpu":
+        models["rtmpose_onnx_device"] = "cuda"
+    device = str(models.get("device") or "").strip().lower()
+    if device in ("", "cpu"):
+        models["device"] = "cuda:0"
+
+
 def _apply_inference_env_overrides(app_config: dict) -> None:
     """容器环境变量覆盖推理参数（来自全局默认 + 摄像头个性化）。"""
     mapping = {
@@ -85,6 +97,7 @@ async def _run_worker():
 
     app_config = load_app_config()
     _apply_inference_env_overrides(app_config)
+    _apply_gpu_overrides(app_config)
     backend = resolve_backend_name(app_config)
     base_dir = app_config["paths"]["base_localdata_dir"]
     json_path = os.environ.get("INFERENCE_JSON_PATH", "").strip() or app_config["paths"]["default_json_file"]

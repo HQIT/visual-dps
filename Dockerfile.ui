@@ -16,7 +16,6 @@ COPY docker/debian-mirror.sh /tmp/debian-mirror.sh
 RUN sh /tmp/debian-mirror.sh "${APT_MIRROR}" && rm /tmp/debian-mirror.sh
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg \
     libgl1 \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
@@ -41,9 +40,7 @@ ENV BASE_DIR=/app \
     LAST_FRAME=/app/localdata/last_frame.jpg \
     CAMERA_IPS_FILE=/app/localdata/camera_ips.json \
     FRAMES_DIR=/app/localdata/frames \
-    FRONTEND_DIST=/app/web/dist \
-    CAPTURE_HEIGHT=480 \
-    RTSP_CAPTURE_BACKEND=auto
+    FRONTEND_DIST=/app/web/dist
 
 EXPOSE 8045
 

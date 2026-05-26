@@ -1,9 +1,13 @@
-export const STREAM_HEIGHTS = [320, 480, 720];
-export const STREAM_FORMATS = ['mjpeg', 'hls', 'webrtc'];
-export const DEFAULT_STREAM_PREFS = { format: 'mjpeg', height: 480 };
+export const STREAM_FORMATS = ['webrtc', 'hls'];
+export const DEFAULT_STREAM_PREFS = { format: 'webrtc' };
 
 function storageKey(cameraId) {
   return `monitorStreamPrefs:${cameraId}`;
+}
+
+function normalizeFormat(format) {
+  if (format === 'mjpeg') return 'webrtc';
+  return STREAM_FORMATS.includes(format) ? format : DEFAULT_STREAM_PREFS.format;
 }
 
 export function loadStreamPrefs(cameraId) {
@@ -12,9 +16,7 @@ export function loadStreamPrefs(cameraId) {
     const raw = localStorage.getItem(storageKey(cameraId));
     if (!raw) return { ...DEFAULT_STREAM_PREFS };
     const parsed = JSON.parse(raw);
-    const height = STREAM_HEIGHTS.includes(parsed.height) ? parsed.height : DEFAULT_STREAM_PREFS.height;
-    const format = STREAM_FORMATS.includes(parsed.format) ? parsed.format : DEFAULT_STREAM_PREFS.format;
-    return { format, height };
+    return { format: normalizeFormat(parsed.format) };
   } catch {
     return { ...DEFAULT_STREAM_PREFS };
   }
@@ -22,9 +24,8 @@ export function loadStreamPrefs(cameraId) {
 
 export function saveStreamPrefs(cameraId, prefs) {
   if (!cameraId || !prefs) return;
-  localStorage.setItem(storageKey(cameraId), JSON.stringify(prefs));
-}
-
-export function heightLabel(h) {
-  return `${h}p`;
+  localStorage.setItem(
+    storageKey(cameraId),
+    JSON.stringify({ format: normalizeFormat(prefs.format) }),
+  );
 }

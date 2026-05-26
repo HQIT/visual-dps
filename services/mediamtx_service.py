@@ -105,6 +105,25 @@ def path_from_url(url: str) -> str:
     return parts[-1] if parts else ""
 
 
+def mediamtx_path_ready(path: str) -> bool:
+    """通过 MediaMTX Control API 判断 path 是否已有可读流（无需 UI 侧 RTSP 解码）。"""
+    slug = str(path or "").strip().strip("/")
+    if not slug or not MEDIAMTX_API_URL:
+        return False
+    try:
+        data = _mediamtx_api("GET", f"/v3/paths/get/{slug}")
+        return bool(data.get("ready"))
+    except Exception:
+        return False
+
+
+def mediamtx_path_ready_for_camera(camera: dict) -> bool:
+    if not is_mediamtx_playback_available(camera):
+        return False
+    slug = str(camera.get("path") or camera.get("id") or "").strip()
+    return mediamtx_path_ready(slug)
+
+
 def cameras_needing_mediamtx_paths(cameras: List[dict]) -> List[dict]:
     """需在 MediaMTX 上存在 path 的摄像头（托管源 + 指向本机 MTX 的 external）。"""
     out: List[dict] = []

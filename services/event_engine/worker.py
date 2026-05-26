@@ -55,6 +55,14 @@ class EventRedisWorker:
         infer_cfg = app_config.get("inference", {}) or {}
         self._alarm_min = int(infer_cfg.get("alarm_min_consecutive_frames", 3) or 3)
         self._alarm_cooldown = int(infer_cfg.get("alarm_cooldown_frames", 12) or 12)
+        try:
+            self._alarm_min_sec = float(infer_cfg.get("alarm_min_consecutive_sec", 0) or 0)
+        except (TypeError, ValueError):
+            self._alarm_min_sec = 0.0
+        try:
+            self._alarm_cooldown_sec = float(infer_cfg.get("alarm_cooldown_sec", 0) or 0)
+        except (TypeError, ValueError):
+            self._alarm_cooldown_sec = 0.0
         self._video_fps = float(infer_cfg.get("frame_rate", 15) or 15)
         self._delivery = pose_delivery_mode()
         self._shard_count, self._shard_index = shard_config()
@@ -96,8 +104,17 @@ class EventRedisWorker:
                 boxes,
                 alarm_min_consecutive_frames=self._alarm_min,
                 alarm_cooldown_frames=self._alarm_cooldown,
+                alarm_min_consecutive_sec=self._alarm_min_sec,
+                alarm_cooldown_sec=self._alarm_cooldown_sec,
                 video_fps=self._video_fps,
             )
+            if self._alarm_min_sec > 0:
+                mode_note = f"time_trigger={self._alarm_min_sec:.2f}s"
+                if self._alarm_cooldown_sec > 0:
+                    mode_note += f" time_cooldown={self._alarm_cooldown_sec:.2f}s"
+                else:
+                    mode_note += f" frame_cooldown={self._alarm_cooldown}"
+                logger.info("event worker alarm gate camera=%s %s", camera_id, mode_note)
             ctx = _CameraContext(
                 json_path=json_path,
                 json_mtime=mtime,

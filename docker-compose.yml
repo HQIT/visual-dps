@@ -5,6 +5,9 @@
 x-china-build-args: &china-build-args
   APT_MIRROR: ${APT_MIRROR:-mirrors.aliyun.com}
   PIP_INDEX: ${PIP_INDEX:-https://pypi.tuna.tsinghua.edu.cn/simple}
+  GITHUB_PROXY_BASE: ${GITHUB_PROXY_BASE:-https://ghfast.top}
+  HTTP_PROXY: ${HTTP_PROXY:-}
+  HTTPS_PROXY: ${HTTPS_PROXY:-}
 
 services:
   redis:
@@ -54,7 +57,6 @@ services:
       - LAST_FRAME=/app/localdata/last_frame.jpg
       - CAMERA_IPS_FILE=/app/localdata/camera_ips.json
       - FRAMES_DIR=/app/localdata/frames
-      - CAPTURE_HEIGHT=480
       - FRONTEND_DIST=/app/web/dist
       - MEDIAMTX_CONFIG_PATH=/app/localdata/mediamtx.yml
       - MEDIAMTX_API_URL=http://mediamtx:9997
@@ -66,9 +68,9 @@ services:
       - MEDIAMTX_WEBRTC_PORT=${MEDIAMTX_WEBRTC_PORT:-8889}
       - MEDIAMTX_HLS_BASE=http://mediamtx:8888
       - MEDIAMTX_WEBRTC_BASE=http://mediamtx:8889
-      - RTSP_CAPTURE_BACKEND=opencv
       - HOST_PROJECT_ROOT=${PWD}
-      - INFERENCE_IMAGE=${INFERENCE_IMAGE:-visual-dps-inference-lite:latest}
+      # 留空时由 INFERENCE_USE_GPU + lite/lite-gpu 镜像自动选择；显式指定则强制该镜像
+      - INFERENCE_IMAGE=${INFERENCE_IMAGE:-}
       - INFERENCE_LITE_IMAGE=${INFERENCE_LITE_IMAGE:-visual-dps-inference-lite:latest}
       - INFERENCE_LITE_GPU_IMAGE=${INFERENCE_LITE_GPU_IMAGE:-visual-dps-inference-lite-gpu:latest}
       - INFERENCE_USE_GPU=${INFERENCE_USE_GPU:-0}
@@ -104,6 +106,8 @@ services:
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
       - JSON_DIR=/app/localdata/json
       - POSE_DELIVERY=stream
+      - POSE_STREAM_KEY=pose:stream
+      - POSE_STREAM_GROUP=event-workers
     volumes:
       - ./app_config.json:/app/app_config.json:ro
       - ./localdata:/app/localdata
@@ -127,12 +131,24 @@ services:
     image: visual-dps-inference-lite:latest
     command: ["python", "inference_worker.py"]
 
+  # 重依赖基座（mmpose/mmcv/ffmpeg/模型）— 极少重建
+  visual-dps-inference-lite-gpu-base:
+    profiles: ["build-only"]
+    build:
+      context: .
+      dockerfile: Dockerfile.inference-lite-gpu-base
+      args: *china-build-args
+    image: visual-dps-inference-lite-gpu-base:latest
+
+  # 应用层：只 COPY 代码，日常改 services 用这个
   visual-dps-inference-lite-gpu:
     profiles: ["build-only"]
     build:
       context: .
       dockerfile: Dockerfile.inference-lite-gpu
-      args: *china-build-args
+      args:
+        <<: *china-build-args
+        INFERENCE_LITE_GPU_BASE: ${INFERENCE_LITE_GPU_BASE:-visual-dps-inference-lite-gpu-base:latest}
     image: visual-dps-inference-lite-gpu:latest
     command: ["python", "inference_worker.py"]
 

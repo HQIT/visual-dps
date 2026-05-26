@@ -54,15 +54,10 @@ export async function apiPatch(path, body) {
   return parseJson(resp);
 }
 
+/** 仅读取 POST /capture 已落盘的 jpg，不会触发 RTSP 抓帧 */
 export function thumbnailUrl(cameraId, lastFrameAt) {
-  const t = lastFrameAt ? Math.floor(lastFrameAt) : Date.now();
+  const t = lastFrameAt ? Math.floor(lastFrameAt) : 0;
   return `/api/cameras/${encodeURIComponent(cameraId)}/thumbnail?t=${t}`;
-}
-
-/** MJPEG 实时预览流（浏览器 img 直接播放，勿轮询抓帧） */
-export function cameraStreamUrl(cameraId, height = 480) {
-  const h = Number(height) || 480;
-  return `/api/cameras/${encodeURIComponent(cameraId)}/stream?height=${h}`;
 }
 
 export function cameraPlaybackUrl(cameraId) {

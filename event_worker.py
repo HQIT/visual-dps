@@ -6,8 +6,8 @@ import signal
 
 from core.config import load_app_config
 from services.callback_reporter import CollisionCallbackReporter
-from services.event_engine.sharding import shard_label
 from services.event_engine.worker import EventRedisWorker
+from services.pose_bus import POSE_STREAM_GROUP, POSE_STREAM_KEY, pose_delivery_mode
 
 
 async def _run():
@@ -17,7 +17,6 @@ async def _run():
 
     worker = EventRedisWorker(app_config, callback_reporter=reporter)
     await worker.start()
-    from services.pose_bus import POSE_STREAM_GROUP, POSE_STREAM_KEY, pose_delivery_mode
 
     instance_id = os.environ.get("EVENT_WORKER_INSTANCE_ID", "").strip() or os.environ.get("HOSTNAME", "")
     delivery = pose_delivery_mode()

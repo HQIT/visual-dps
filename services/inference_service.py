@@ -21,17 +21,22 @@ try:
 except Exception:
     torch = None
 
-from services.event_bus import get_event_snapshot
+from services.collision_runtime import (
+    collision_in_inference,
+    create_collision_processor,
+    format_alarm_gate_note,
+)
+from services.event_engine.annotation_boxes import load_scaled_boxes
 from services.inference_backends import create_inference_backend, resolve_backend_name
-from services.rtsp_capture import drain_capture_buffer, open_rtsp_capture, read_latest_frame
+from services.rtsp_capture import open_rtsp_capture
 
 
-def _drain_stream_buffer(cap: cv2.VideoCapture) -> None:
-    drain_capture_buffer(cap)
+def _read_stream_frame(cap):
+    return cap.read_frame()
 
 
-def _read_stream_frame(cap: cv2.VideoCapture):
-    return read_latest_frame(cap)
+def _discard_stream_frame(cap) -> None:
+    cap.read_frame()
 
 
 def _parse_cuda_device_index(device_name: str) -> int:
@@ -122,6 +127,40 @@ def _compute_infer_resolution(source_w: int, source_h: int, target_height: int):
         infer_h = max(2, infer_h - (infer_h % 2))
         resize_needed = True
     return infer_w, infer_h, resize_needed
+
+
+def _publish_event_sync(
+    camera_id: str,
+    frame_idx: int,
+    collisions: list,
+    alarm_collisions: list,
+    skeletons: list,
+) -> bool:
+    from services.event_bus import publish_event_frame
+
+    return publish_event_frame(
+        camera_id,
+        frame_idx=frame_idx,
+        collisions=collisions,
+        alarm_collisions=alarm_collisions,
+        skeletons=skeletons,
+    )
+
+
+def _publish_alarm_sync(
+    camera_id: str,
+    frame_idx: int,
+    alarm_collisions: list,
+    video_time_sec: float,
+) -> bool:
+    from services.alarm_bus import publish_alarm_frame
+
+    return publish_alarm_frame(
+        camera_id,
+        frame_idx=frame_idx,
+        alarm_collisions=alarm_collisions,
+        video_time_sec=video_time_sec,
+    )
 
 
 class InferenceService:
@@ -224,7 +263,7 @@ class InferenceService:
         if is_stream:
             stream_buffer_size = int(self.app_config["inference"].get("stream_buffer_size", 1))
             cap = open_rtsp_capture(self.state.video_path, buffer_size=stream_buffer_size)
-            print("ℹ️ RTSP 低延迟采帧已启用（丢旧帧 + buffer=1）")
+            print("ℹ️ RTSP 采样节拍由 frame_rate / pose_frame_interval 控制")
         else:
             cap = cv2.VideoCapture(self.state.video_path)
 
@@ -246,6 +285,18 @@ class InferenceService:
             stream_h,
             int(infer_cfg.get("height", 480) or 480),
         )
+
+        collision_processor = None
+        if collision_in_inference():
+            boxes = load_scaled_boxes(json_file_path, infer_w, infer_h)
+            collision_processor = create_collision_processor(boxes, self.app_config)
+            if collision_processor is None:
+                print(f"⚠️ [警告] 未加载到货框，碰撞检测不可用: {json_file_path}")
+            else:
+                print(
+                    f"ℹ️ 碰撞检测: 推理容器内运行 boxes={len(boxes)} "
+                    f"gate={format_alarm_gate_note(self.app_config)}"
+                )
 
         frame_rate = float(infer_cfg.get("frame_rate", 15) or 15)
         frame_rate = max(1.0, frame_rate)
@@ -290,7 +341,7 @@ class InferenceService:
 
                 if headless_stream and (frame_count % pose_frame_interval) != 0:
                     await asyncio.get_running_loop().run_in_executor(
-                        self._executor, _drain_stream_buffer, cap
+                        self._executor, _discard_stream_frame, cap
                     )
                     frame_count += 1
                     elapsed_skip = time.monotonic() - loop_started_at
@@ -346,7 +397,57 @@ class InferenceService:
 
                     cached_skeletons_data = skeletons_data
 
-                    if is_null_ws and inference_camera_id:
+                    if inference_camera_id:
+                        collision_result = None
+                        if collision_processor is not None:
+                            pose_frame = {
+                                "frame_idx": frame_count,
+                                "persons": skeletons_data,
+                            }
+                            collision_result = await asyncio.get_running_loop().run_in_executor(
+                                self._executor,
+                                collision_processor.process,
+                                pose_frame,
+                            )
+                            skeletons_data = list(
+                                collision_result.get("skeletons") or skeletons_data
+                            )
+                            cached_collisions = list(collision_result.get("collisions") or [])
+                            cached_alarm_collisions = list(
+                                collision_result.get("alarm_collisions") or []
+                            )
+
+                        if is_null_ws or collision_in_inference():
+                            from services.pose_bus import publish_pose_frame
+
+                            publish_pose_frame(
+                                inference_camera_id,
+                                frame_idx=frame_count,
+                                persons=skeletons_data,
+                                infer_width=infer_w,
+                                infer_height=infer_h,
+                            )
+
+                        if collision_processor is not None and collision_result is not None:
+                            await asyncio.get_running_loop().run_in_executor(
+                                self._executor,
+                                _publish_event_sync,
+                                inference_camera_id,
+                                frame_count,
+                                cached_collisions,
+                                cached_alarm_collisions,
+                                skeletons_data,
+                            )
+                            if cached_alarm_collisions:
+                                await asyncio.get_running_loop().run_in_executor(
+                                    self._executor,
+                                    _publish_alarm_sync,
+                                    inference_camera_id,
+                                    frame_count,
+                                    cached_alarm_collisions,
+                                    frame_count / max(1.0, float(video_fps)),
+                                )
+                    elif inference_camera_id and is_null_ws:
                         from services.pose_bus import publish_pose_frame
 
                         publish_pose_frame(
@@ -358,14 +459,23 @@ class InferenceService:
                         )
 
                 skeletons_data = cached_skeletons_data
-                event_snap = get_event_snapshot(inference_camera_id) if inference_camera_id else None
-                if event_snap:
-                    active_collisions = list(event_snap.get("collisions") or [])
-                    alarm_collisions = list(event_snap.get("alarm_collisions") or [])
-                    if event_snap.get("skeletons"):
-                        skeletons_data = list(event_snap.get("skeletons") or skeletons_data)
-                    cached_collisions = active_collisions
-                    cached_alarm_collisions = alarm_collisions
+                if (
+                    not collision_in_inference()
+                    and inference_camera_id
+                ):
+                    from services.event_bus import get_event_snapshot
+
+                    event_snap = get_event_snapshot(inference_camera_id)
+                    if event_snap:
+                        active_collisions = list(event_snap.get("collisions") or [])
+                        alarm_collisions = list(event_snap.get("alarm_collisions") or [])
+                        if event_snap.get("skeletons"):
+                            skeletons_data = list(event_snap.get("skeletons") or skeletons_data)
+                        cached_collisions = active_collisions
+                        cached_alarm_collisions = alarm_collisions
+                    else:
+                        active_collisions = cached_collisions
+                        alarm_collisions = cached_alarm_collisions
                 else:
                     active_collisions = cached_collisions
                     alarm_collisions = cached_alarm_collisions

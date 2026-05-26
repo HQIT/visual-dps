@@ -26,9 +26,13 @@ _PRIVATE_IP_RE = re.compile(
 
 def _rewrite_webrtc_sdp(body: bytes) -> bytes:
     text = body.decode("utf-8", errors="replace")
-    if not _PRIVATE_IP_RE.search(text):
-        return body
-    return _PRIVATE_IP_RE.sub(MEDIAMTX_PUBLIC_HOST, text).encode("utf-8")
+    host = (MEDIAMTX_PUBLIC_HOST or "127.0.0.1").strip()
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        # MediaMTX 常通告 127.0.0.1；远程浏览器必须改为宿主机 LAN IP
+        text = text.replace("127.0.0.1", host).replace("localhost", host)
+    if _PRIVATE_IP_RE.search(text):
+        text = _PRIVATE_IP_RE.sub(host, text)
+    return text.encode("utf-8")
 
 
 def _rewrite_m3u8(body: bytes, camera_id: str, path_slug: str) -> bytes:
@@ -77,13 +81,47 @@ async def proxy_hls(camera_id: str, path_slug: str, subpath: str, request: Reque
     return Response(content=content, status_code=upstream.status_code, headers=headers)
 
 
-async def proxy_whep(path_slug: str, request: Request) -> Response:
+def _rewrite_whep_location(location: str, camera_id: str, path_slug: str) -> str:
+    """将 MediaMTX 返回的会话 Location 改写为 UI 同源路径（供 Trickle ICE PATCH/DELETE）。"""
+    loc = (location or "").strip()
+    if not loc:
+        return loc
+    marker = f"/{path_slug}/whep/"
+    idx = loc.find(marker)
+    if idx >= 0:
+        session_id = loc[idx + len(marker) :].split("?")[0].strip("/")
+        if session_id:
+            return f"/api/cameras/{camera_id}/whep/{session_id}"
+    # 已是同源路径
+    if loc.startswith(f"/api/cameras/{camera_id}/whep"):
+        return loc
+    return loc
+
+
+async def proxy_whep(
+    camera_id: str,
+    path_slug: str,
+    request: Request,
+    session_suffix: str = "",
+) -> Response:
     target = f"{MEDIAMTX_WEBRTC_BASE}/{path_slug}/whep"
-    body = await request.body()
-    headers = {"Content-Type": request.headers.get("content-type", "application/sdp")}
+    suffix = (session_suffix or "").strip().strip("/")
+    if suffix:
+        target = f"{target}/{suffix}"
+
+    headers: dict[str, str] = {}
+    for key in ("content-type", "if-match"):
+        val = request.headers.get(key)
+        if val:
+            headers[key] = val
+
+    body = None
+    if request.method in ("POST", "PATCH"):
+        body = await request.body()
+
     try:
         async with httpx.AsyncClient(timeout=PROXY_TIMEOUT) as client:
-            upstream = await client.post(target, content=body, headers=headers)
+            upstream = await client.request(request.method, target, content=body, headers=headers)
     except httpx.HTTPError as exc:
         return JSONResponse(
             status_code=502,
@@ -93,16 +131,23 @@ async def proxy_whep(path_slug: str, request: Request) -> Response:
             },
         )
 
-    out_headers = {}
-    for key in ("content-type", "location", "etag"):
-        if key in upstream.headers:
-            out_headers[key] = upstream.headers[key]
-    if "content-type" not in out_headers:
+    out_headers: dict[str, str] = {}
+    for key in ("content-type", "location", "etag", "link"):
+        if key not in upstream.headers:
+            continue
+        val = upstream.headers[key]
+        if key == "location":
+            val = _rewrite_whep_location(val, camera_id, path_slug)
+        out_headers[key] = val
+
+    if request.method == "POST" and "content-type" not in out_headers:
         out_headers["Content-Type"] = "application/sdp"
+
     content = upstream.content
-    ctype = (out_headers.get("Content-Type") or upstream.headers.get("content-type") or "").lower()
-    if upstream.is_success and "sdp" in ctype:
+    ctype = (out_headers.get("content-type") or upstream.headers.get("content-type") or "").lower()
+    if request.method == "POST" and upstream.is_success and "sdp" in ctype:
         content = _rewrite_webrtc_sdp(content)
+
     return Response(
         content=content,
         status_code=upstream.status_code,

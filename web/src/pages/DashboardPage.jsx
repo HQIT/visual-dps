@@ -3,7 +3,16 @@ import { useNavigate } from 'react-router-dom';
 import CameraSetupDrawer from '../components/CameraSetupDrawer';
 import InferenceToggle from '../components/InferenceToggle';
 import { confirmDeleteCamera } from '../lib/confirmDelete';
-import { apiDelete, apiGet, apiPost, apiPut, formatDuration, thumbnailUrl } from '../api/client';
+import {
+  apiDelete,
+  apiGet,
+  apiPost,
+  apiPut,
+  cameraPlaybackUrl,
+  formatDuration,
+  thumbnailUrl,
+} from '../api/client';
+import { captureThumbnailFromHls } from '../lib/captureFrameFromVideo';
 import {
   STREAM_CONFIG_SAVED_HINT,
   formatInferenceMessage,
@@ -48,6 +57,8 @@ export default function DashboardPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerMode, setDrawerMode] = useState('edit');
   const [setupCamera, setSetupCamera] = useState(null);
+  /** 用户手动抓帧后的预览（data URL），不自动请求 /thumbnail */
+  const [previewById, setPreviewById] = useState({});
   const [form, setForm] = useState(emptyForm());
   const [saving, setSaving] = useState(false);
   const [configHint, setConfigHint] = useState('');
@@ -326,10 +337,23 @@ export default function DashboardPage() {
   const captureFrame = async (cam) => {
     setRefreshingId(cam.id);
     try {
-      const data = await apiPost(`/api/cameras/${encodeURIComponent(cam.id)}/capture`, {});
+      const pb = await apiGet(cameraPlaybackUrl(cam.id));
+      const hlsUrl = pb?.formats?.hls?.url;
+      if (!pb || pb.status !== 'success' || !hlsUrl || !pb.formats?.hls?.available) {
+        alert(formatUserError(pb?.error) || '无法抓帧：HLS 预览不可用');
+        return;
+      }
+      const image = await captureThumbnailFromHls(hlsUrl);
+      const data = await apiPost(`/api/cameras/${encodeURIComponent(cam.id)}/capture`, { image });
       if (data.status !== 'success') {
         alert(formatUserError(data.error) || '抓帧失败');
         return;
+      }
+      if (data.image) {
+        setPreviewById((prev) => ({
+          ...prev,
+          [cam.id]: `data:image/jpeg;base64,${data.image}`,
+        }));
       }
       const patch = {
         has_thumbnail: true,
@@ -406,10 +430,12 @@ export default function DashboardPage() {
                     }
                   }}
                 >
-                  {cam.has_thumbnail ? (
+                  {previewById[cam.id] ? (
+                    <img src={previewById[cam.id]} alt={cam.name} />
+                  ) : cam.has_thumbnail ? (
                     <img src={thumbnailUrl(cam.id, cam.last_frame_at)} alt={cam.name} />
                   ) : (
-                    <div className="card-preview-empty">暂无画面</div>
+                    <div className="card-preview-empty">点击 ↻ 抓帧预览</div>
                   )}
                   <div className="card-actions" onClick={(e) => e.stopPropagation()}>
                     <InferenceToggle
@@ -431,7 +457,10 @@ export default function DashboardPage() {
                       className="btn-icon"
                       title="抓帧"
                       disabled={refreshingId === cam.id}
-                      onClick={() => captureFrame(cam)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        captureFrame(cam);
+                      }}
                     >
                       ↻
                     </button>
@@ -474,6 +503,7 @@ export default function DashboardPage() {
         open={drawerOpen}
         mode={drawerMode}
         camera={drawerCamera}
+        previewSrc={drawerCamera ? previewById[drawerCamera.id] : null}
         form={form}
         onChange={onFormChange}
         globalDefaults={globalSettings}

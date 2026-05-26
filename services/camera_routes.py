@@ -17,7 +17,6 @@ from services.camera_service import (
     list_cameras_with_status,
     stable_camera_id,
 )
-from services.camera_stream_service import iter_mjpeg, mjpeg_media_type, stream_recently_active
 from services.camera_store import (
     apply_mediamtx,
     create_camera,
@@ -39,7 +38,6 @@ from services.mediamtx_service import (
     is_mediamtx_managed,
     is_mediamtx_playback_available,
 )
-from services.stream_prefs import STREAM_HEIGHT_CHOICES, clamp_stream_height
 from core.config import try_load_app_config
 from services.annotation_service import (
     annotation_payload_for_api,
@@ -98,7 +96,7 @@ def register_camera_routes(
         url = str(cam.get("url") or "").strip()
         cid = stable_camera_id(cam)
         if url:
-            st = get_camera_status(url, force_probe=probe, camera_id=cid)
+            st = get_camera_status(url, force_probe=probe, camera_id=cid, camera=cam)
             cam["online"] = st["online"]
             cam["activity_seconds"] = st.get("activity_seconds", 0)
         else:
@@ -106,11 +104,6 @@ def register_camera_routes(
             cam["activity_seconds"] = 0
         thumb_path = get_camera_thumbnail_path(frames_dir, cid)
         cam["last_frame_at"] = os.path.getmtime(thumb_path) if thumb_path else None
-        if not cam["online"]:
-            if stream_recently_active(cid):
-                cam["online"] = True
-            elif cam["last_frame_at"] and (time.time() - cam["last_frame_at"]) < 120:
-                cam["online"] = True
         cam["has_thumbnail"] = thumb_path is not None
         from services.inference_container_service import attach_inference_status
 
@@ -271,15 +264,13 @@ def register_camera_routes(
             "path": path,
             "mediamtx_managed": managed,
             "mediamtx_playback": playback_ok,
-            "heights": list(STREAM_HEIGHT_CHOICES),
             "formats": {
-                "mjpeg": {"available": True},
                 "hls": {"available": bool(urls.get("hls")), "url": urls.get("hls") or ""},
                 "webrtc": {"available": bool(urls.get("whep")), "url": urls.get("whep") or ""},
             },
         }
 
-    @router.post("/cameras/{camera_id}/whep")
+    @router.api_route("/cameras/{camera_id}/whep", methods=["OPTIONS", "POST"])
     async def camera_whep_proxy(camera_id: str, request: Request):
         found = get_camera(camera_ips_file, camera_id)
         if found.get("error"):
@@ -291,7 +282,21 @@ def register_camera_routes(
                 content={"error": "该摄像头未由 MediaMTX 托管，无法使用 WebRTC"},
             )
         path = str(cam.get("path") or cam.get("id") or "").strip()
-        return await proxy_whep(path, request)
+        return await proxy_whep(camera_id, path, request)
+
+    @router.api_route("/cameras/{camera_id}/whep/{session_suffix:path}", methods=["PATCH", "DELETE"])
+    async def camera_whep_session_proxy(camera_id: str, session_suffix: str, request: Request):
+        found = get_camera(camera_ips_file, camera_id)
+        if found.get("error"):
+            return JSONResponse(status_code=404, content=found)
+        cam = found["camera"]
+        if not is_mediamtx_playback_available(cam):
+            return JSONResponse(
+                status_code=400,
+                content={"error": "该摄像头未由 MediaMTX 托管，无法使用 WebRTC"},
+            )
+        path = str(cam.get("path") or cam.get("id") or "").strip()
+        return await proxy_whep(camera_id, path, request, session_suffix=session_suffix)
 
     @router.get("/cameras/{camera_id}/hls/{subpath:path}")
     async def camera_hls_proxy(camera_id: str, subpath: str, request: Request):
@@ -307,22 +312,9 @@ def register_camera_routes(
         path = str(cam.get("path") or cam.get("id") or "").strip()
         return await proxy_hls(camera_id, path, subpath, request)
 
-    @router.get("/cameras/{camera_id}/stream")
-    async def camera_mjpeg_stream(camera_id: str, height: int | None = None):
-        found = get_camera(camera_ips_file, camera_id)
-        if found.get("error"):
-            return JSONResponse(status_code=404, content=found)
-        url = str(found["camera"].get("url") or "").strip()
-        if not url:
-            return JSONResponse(status_code=400, content={"error": "请填写视频流地址"})
-        stream_height = clamp_stream_height(height if height is not None else capture_height)
-        return StreamingResponse(
-            iter_mjpeg(camera_id, url, stream_height),
-            media_type=mjpeg_media_type(),
-        )
-
     @router.get("/cameras/{camera_id}/thumbnail")
     async def camera_thumbnail(camera_id: str):
+        """仅返回已保存的抓帧文件（POST /capture 写入），不连接 RTSP。"""
         thumb_path = get_camera_thumbnail_path(frames_dir, camera_id)
         if not thumb_path:
             return JSONResponse(status_code=404, content={"error": "thumbnail not found"})
@@ -365,30 +357,37 @@ def register_camera_routes(
         return result
 
     @router.post("/cameras/{camera_id}/capture")
-    async def camera_capture_frame(camera_id: str):
+    async def camera_capture_frame(camera_id: str, data: dict):
         found = get_camera(camera_ips_file, camera_id)
         if found.get("error"):
             return JSONResponse(status_code=404, content=found)
-        url = str(found["camera"].get("url") or "").strip()
-        if not url:
-            return JSONResponse(status_code=400, content={"error": "请填写视频流地址"})
+        cam = found["camera"]
+        url = str(cam.get("url") or "").strip()
         return capture_camera_frame(
+            image=str(data.get("image") or ""),
             url=url,
-            capture_height=capture_height,
             frames_dir=frames_dir,
             last_frame_file=last_frame_file,
             camera_ips_file=camera_ips_file,
+            camera_id=camera_id,
         )
 
     @router.post("/get_camera_frame")
     async def get_camera_frame(data: dict, request: Request):
         url = str(data.get("url", "")).strip()
-        if not url:
-            return {"error": "url is required"}
+        image = str(data.get("image") or "")
+        if not image:
+            return {"error": "请从监控页预览抓帧后上传 image（base64 JPEG）"}
+        camera_id = ""
+        if url and camera_ips_file:
+            from services.camera_service import resolve_camera_id_for_url
+
+            camera_id = resolve_camera_id_for_url(camera_ips_file, url)
         return capture_camera_frame(
+            image=image,
             url=url,
-            capture_height=capture_height,
             frames_dir=frames_dir,
             last_frame_file=last_frame_file,
             camera_ips_file=camera_ips_file,
+            camera_id=camera_id,
         )

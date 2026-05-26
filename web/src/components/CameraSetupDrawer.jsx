@@ -16,6 +16,7 @@ export default function CameraSetupDrawer({
   open,
   mode,
   camera,
+  previewSrc = null,
   form,
   globalDefaults = {},
   effectiveSettings = {},
@@ -99,10 +100,12 @@ export default function CameraSetupDrawer({
                       ↻
                     </button>
                   </div>
-                  {camera.has_thumbnail ? (
+                  {previewSrc ? (
+                    <img src={previewSrc} alt="" />
+                  ) : camera.has_thumbnail ? (
                     <img src={thumbnailUrl(camera.id, camera.last_frame_at)} alt="" />
                   ) : (
-                    <div className="drawer-preview-empty">暂无预览</div>
+                    <div className="drawer-preview-empty">点击 ↻ 抓取预览</div>
                   )}
                 </div>
                 <DetailRow

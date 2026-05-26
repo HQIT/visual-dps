@@ -2,24 +2,13 @@
 
 import base64
 import hashlib
-import json
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List
 
-import cv2
-
-from services.video_service import read_non_black_frame, resize_frame_to_height
-
-RTSP_HOST_REWRITE = os.environ.get("RTSP_HOST_REWRITE", "")
 PROBE_TTL_SEC = max(5, int(os.environ.get("CAMERA_PROBE_TTL", "20")))
-PROBE_MAX_READS = max(1, int(os.environ.get("CAMERA_PROBE_MAX_READS", "2")))
 PROBE_MAX_WORKERS = max(1, int(os.environ.get("CAMERA_PROBE_MAX_WORKERS", "8")))
-_FFMPEG_CAPTURE_OPTS = os.environ.get(
-    "OPENCV_FFMPEG_CAPTURE_OPTIONS",
-    "rtsp_transport;tcp|stimeout;3000000|max_delay;500000",
-)
 
 _camera_runtime: dict = {}
 
@@ -27,11 +16,12 @@ _camera_runtime: dict = {}
 def normalize_rtsp_url(url: str) -> str:
     """宿主机配置多为 rtsp://127.0.0.1:8554/…；compose 内 UI/推理应连 mediamtx 服务名。"""
     rewritten = str(url or "")
-    if RTSP_HOST_REWRITE:
+    rtsp_host_rewrite = os.environ.get("RTSP_HOST_REWRITE", "").strip()
+    if rtsp_host_rewrite:
         if "127.0.0.1" in rewritten:
-            rewritten = rewritten.replace("127.0.0.1", RTSP_HOST_REWRITE)
+            rewritten = rewritten.replace("127.0.0.1", rtsp_host_rewrite)
         if "localhost" in rewritten:
-            rewritten = rewritten.replace("localhost", RTSP_HOST_REWRITE)
+            rewritten = rewritten.replace("localhost", rtsp_host_rewrite)
         return rewritten
     mtx_host = os.environ.get("MEDIAMTX_INTERNAL_HOST", "").strip()
     if mtx_host:
@@ -47,6 +37,11 @@ def camera_id_from_url(url: str) -> str:
 def camera_thumbnail_path(frames_dir: str, camera_id: str) -> str:
     os.makedirs(frames_dir, exist_ok=True)
     return os.path.join(frames_dir, f"{camera_id}.jpg")
+
+
+def get_camera_thumbnail_path(frames_dir: str, camera_id: str) -> str | None:
+    path = camera_thumbnail_path(frames_dir, camera_id)
+    return path if os.path.isfile(path) else None
 
 
 def stable_camera_id(record: dict) -> str:
@@ -65,27 +60,47 @@ def save_camera_ips(camera_ips_file: str, items: List[dict]):
     _save(camera_ips_file, items)
 
 
-def frame_to_base64(frame) -> str | None:
-    ok, encoded = cv2.imencode(".jpg", frame)
-    if not ok:
-        return None
-    return base64.b64encode(encoded.tobytes()).decode("utf-8")
+def _decode_jpeg_payload(image: str) -> bytes:
+    raw = str(image or "").strip()
+    if not raw:
+        raise ValueError("image is required")
+    if raw.startswith("data:"):
+        raw = raw.split(",", 1)[-1]
+    try:
+        data = base64.b64decode(raw, validate=True)
+    except Exception as exc:
+        raise ValueError("invalid base64 image") from exc
+    if len(data) < 128:
+        raise ValueError("image too small")
+    return data
 
 
-def save_last_frame(last_frame_file: str, frame):
-    if not last_frame_file:
-        return
-    os.makedirs(os.path.dirname(last_frame_file) or ".", exist_ok=True)
-    cv2.imwrite(last_frame_file, frame)
+def save_thumbnail_bytes(
+    camera_id: str,
+    jpeg_bytes: bytes,
+    *,
+    frames_dir: str,
+    last_frame_file: str = "",
+) -> str:
+    thumb_path = camera_thumbnail_path(frames_dir, camera_id)
+    with open(thumb_path, "wb") as f:
+        f.write(jpeg_bytes)
+    if last_frame_file:
+        os.makedirs(os.path.dirname(last_frame_file) or ".", exist_ok=True)
+        with open(last_frame_file, "wb") as f:
+            f.write(jpeg_bytes)
+    return thumb_path
 
 
-def probe_camera_online(url: str, max_reads: int | None = None) -> bool:
-    _ = max_reads
-    from services.rtsp_capture import read_rtsp_frame_once
+def probe_camera_online(url: str, camera: dict | None = None) -> bool:
+    from services.mediamtx_service import mediamtx_path_ready, mediamtx_path_ready_for_camera, path_from_url
 
-    stream_url = normalize_rtsp_url(url)
-    frame = read_rtsp_frame_once(stream_url, timeout_sec=6.0)
-    return frame is not None
+    if camera and mediamtx_path_ready_for_camera(camera):
+        return True
+    slug = path_from_url(url)
+    if slug and mediamtx_path_ready(slug):
+        return True
+    return False
 
 
 def _update_runtime_status(camera_id: str, online: bool) -> dict:
@@ -126,30 +141,38 @@ def _cached_camera_status(cid: str) -> dict | None:
     }
 
 
-def get_camera_status(url: str, *, force_probe: bool = False, camera_id: str | None = None) -> dict:
+def get_camera_status(
+    url: str,
+    *,
+    force_probe: bool = False,
+    camera_id: str | None = None,
+    camera: dict | None = None,
+) -> dict:
     cid = str(camera_id or "").strip() or camera_id_from_url(url.strip())
     if not force_probe:
         cached = _cached_camera_status(cid)
         if cached:
             return cached
 
-    online = probe_camera_online(url)
+    online = probe_camera_online(url, camera=camera)
     status = _update_runtime_status(cid, online)
     status["id"] = cid
     return status
 
 
-def _probe_cameras_parallel(pending: list[tuple[int, str, str]]) -> dict[int, dict]:
+def _probe_cameras_parallel(pending: list[tuple[int, dict]]) -> dict[int, dict]:
     if not pending:
         return {}
     statuses: dict[int, dict] = {}
     workers = min(PROBE_MAX_WORKERS, len(pending))
     with ThreadPoolExecutor(max_workers=workers) as pool:
         future_map = {
-            pool.submit(probe_camera_online, url): (index, cid, url) for index, url, cid in pending
+            pool.submit(probe_camera_online, str(cam.get("url") or ""), cam): (index, cam)
+            for index, cam in pending
         }
         for future in as_completed(future_map):
-            index, cid, url = future_map[future]
+            index, cam = future_map[future]
+            cid = stable_camera_id(cam)
             try:
                 online = future.result()
             except Exception:
@@ -167,7 +190,7 @@ def enrich_camera_items(
     probe_online: bool = True,
     with_inference: bool = True,
 ) -> List[dict]:
-    pending: list[tuple[int, str, str]] = []
+    pending: list[tuple[int, dict]] = []
     status_by_index: dict[int, dict] = {}
 
     for index, item in enumerate(items):
@@ -177,7 +200,7 @@ def enrich_camera_items(
         if cached:
             status_by_index[index] = cached
         elif probe_online and url:
-            pending.append((index, url, cid))
+            pending.append((index, item))
         else:
             status_by_index[index] = {
                 "id": cid,
@@ -244,70 +267,67 @@ def resolve_camera_id_for_url(camera_ips_file: str, raw_url: str) -> str:
 
 
 def capture_camera_frame(
-    url: str,
-    capture_height: int,
+    *,
+    image: str = "",
+    url: str = "",
     frames_dir: str,
     last_frame_file: str = "",
     camera_ips_file: str = "",
+    camera_id: str = "",
 ):
-    raw_url = str(url).strip()
-    if not raw_url:
-        return {"error": "url is required"}
+    """保存缩略图：优先使用浏览器上传的 JPEG base64（B1），不再在 UI 侧拉 RTSP 解码。"""
+    cid = str(camera_id or "").strip()
+    if not cid and camera_ips_file and url:
+        cid = resolve_camera_id_for_url(camera_ips_file, url)
+    if not cid and url:
+        cid = camera_id_from_url(url)
 
-    camera_id = (
-        resolve_camera_id_for_url(camera_ips_file, raw_url)
-        if camera_ips_file
-        else camera_id_from_url(raw_url)
+    if not str(image or "").strip():
+        return {
+            "error": "请从监控页预览（HLS/WebRTC）抓帧后上传，或使用图片文件",
+        }
+
+    try:
+        jpeg_bytes = _decode_jpeg_payload(image)
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+    if not cid:
+        return {"error": "camera_id is required"}
+
+    thumb_path = save_thumbnail_bytes(
+        cid,
+        jpeg_bytes,
+        frames_dir=frames_dir,
+        last_frame_file=last_frame_file,
     )
-    stream_url = normalize_rtsp_url(raw_url)
-    from services.rtsp_capture import read_rtsp_frame_once
+    cam_record = None
+    if camera_ips_file:
+        from services.camera_store import load_cameras
 
-    frame = read_rtsp_frame_once(stream_url, timeout_sec=8.0)
-    if frame is None:
-        _update_runtime_status(camera_id, False)
-        return {"error": "failed to read frame from camera"}
+        for rec in load_cameras(camera_ips_file):
+            if stable_camera_id(rec) == cid:
+                cam_record = rec
+                break
 
-    frame = resize_frame_to_height(frame, capture_height)
-    thumb_path = camera_thumbnail_path(frames_dir, camera_id)
-    cv2.imwrite(thumb_path, frame)
-    save_last_frame(last_frame_file, frame)
-    _update_runtime_status(camera_id, True)
-
-    image_b64 = frame_to_base64(frame)
-    if image_b64 is None:
-        return {"error": "failed to encode frame"}
-
-    runtime = _camera_runtime.get(camera_id, {})
-    online_since = runtime.get("online_since")
-    activity_seconds = int(time.time() - online_since) if online_since else 0
+    online = probe_camera_online(str(url or (cam_record or {}).get("url") or ""), camera=cam_record)
+    status = _update_runtime_status(cid, online)
 
     return {
         "status": "success",
-        "image": image_b64,
-        "camera_id": camera_id,
+        "camera_id": cid,
+        "image": base64.b64encode(jpeg_bytes).decode("utf-8"),
         "last_frame_at": os.path.getmtime(thumb_path),
-        "online": True,
-        "activity_seconds": activity_seconds,
+        "online": status["online"],
+        "activity_seconds": status["activity_seconds"],
     }
 
 
 def get_last_frame_b64(last_frame_file: str):
     if not os.path.exists(last_frame_file):
         return {"error": "last frame not found"}
-
-    frame = cv2.imread(last_frame_file)
-    if frame is None:
+    with open(last_frame_file, "rb") as f:
+        data = f.read()
+    if not data:
         return {"error": "failed to read last frame"}
-
-    image_b64 = frame_to_base64(frame)
-    if image_b64 is None:
-        return {"error": "failed to encode frame"}
-
-    return {"status": "success", "image": image_b64}
-
-
-def get_camera_thumbnail_path(frames_dir: str, camera_id: str) -> str | None:
-    path = camera_thumbnail_path(frames_dir, camera_id)
-    if os.path.exists(path):
-        return path
-    return None
+    return {"status": "success", "image": base64.b64encode(data).decode("utf-8")}

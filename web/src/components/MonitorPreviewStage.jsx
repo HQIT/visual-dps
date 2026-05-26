@@ -1,19 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { cameraStreamUrl } from '../api/client';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { usePreviewStream } from '../hooks/usePreviewStream';
 import { boxRoiKey, resolveMonitorShelves } from '../lib/annotation';
+import { captureVideoFrameToBase64 } from '../lib/captureFrameFromVideo';
 import {
   computeContainLayout,
   mapPointsToVideoFrame,
   polygonToFramePoints,
 } from '../lib/previewLayout';
-import {
-  STREAM_FORMATS,
-  STREAM_HEIGHTS,
-  heightLabel,
-  loadStreamPrefs,
-  saveStreamPrefs,
-} from '../lib/streamPrefs';
+import { STREAM_FORMATS, loadStreamPrefs, saveStreamPrefs } from '../lib/streamPrefs';
 import './MonitorPreviewStage.css';
 
 const ROI_STATE = {
@@ -23,7 +17,7 @@ const ROI_STATE = {
   alarm: { label: '告警', className: 'roi-alarm' },
 };
 
-const FORMAT_LABELS = { mjpeg: 'MJPEG', hls: 'HLS', webrtc: 'WebRTC' };
+const FORMAT_LABELS = { hls: 'HLS', webrtc: 'WebRTC' };
 
 const COCO_LINES = [
   [15, 13], [13, 11], [16, 14], [14, 12], [11, 12], [5, 11], [6, 12], [5, 6], [5, 7], [6, 8],
@@ -191,10 +185,12 @@ function RoiOverviewPanel({ legendItems, shelfPanels }) {
   );
 }
 
-export default function MonitorPreviewStage({
+const MonitorPreviewStage = forwardRef(function MonitorPreviewStage({
   cameraId,
   playback = null,
   imageSrc,
+  onCaptureSnapshot,
+  captureBusy = false,
   boxes = [],
   shelves = [],
   gridShape = [],
@@ -215,7 +211,7 @@ export default function MonitorPreviewStage({
   annotatePanel = null,
   shelfBar = null,
   onFrameSize = null,
-}) {
+}, ref) {
   const stageRef = useRef(null);
   const imgRef = useRef(null);
   const videoRef = useRef(null);
@@ -232,24 +228,40 @@ export default function MonitorPreviewStage({
     const hlsOk = Boolean(playback?.formats?.hls?.available);
     const rtcOk = Boolean(playback?.formats?.webrtc?.available);
     const ok =
-      prefs.format === 'mjpeg' ||
       (prefs.format === 'hls' && hlsOk) ||
       (prefs.format === 'webrtc' && rtcOk);
-    setStreamPrefs(ok ? prefs : { ...prefs, format: 'mjpeg' });
+    const format = ok ? prefs.format : rtcOk ? 'webrtc' : hlsOk ? 'hls' : 'webrtc';
+    setStreamPrefs({ format });
   }, [cameraId, playback]);
 
-  const { format, height } = streamPrefs;
-  const mjpegSrc = cameraId && format === 'mjpeg' ? cameraStreamUrl(cameraId, height) : '';
-  const showVideo = format === 'hls' || format === 'webrtc';
-  const hasMedia = showVideo || mjpegSrc || imageSrc;
+  const { format } = streamPrefs;
+  const showVideo = Boolean(cameraId) && !imageSrc;
+  const hasMedia = showVideo || imageSrc;
+
+  useImperativeHandle(ref, () => ({
+    captureSnapshot: () => {
+      if (!showVideo) {
+        throw new Error('当前为静态图，无法从视频抓帧');
+      }
+      return captureVideoFrameToBase64(videoRef.current);
+    },
+  }), [showVideo]);
+
+  const handleCaptureClick = async () => {
+    if (!onCaptureSnapshot) return;
+    try {
+      const image = captureVideoFrameToBase64(videoRef.current);
+      await onCaptureSnapshot(image);
+    } catch (err) {
+      onCaptureSnapshot(null, err);
+    }
+  };
 
   const { streamError } = usePreviewStream({
     format,
     playback,
-    mjpegSrc,
     videoRef,
-    imgRef,
-    enabled: Boolean(cameraId || imageSrc),
+    enabled: showVideo,
   });
 
   const hitSet = useMemo(() => new Set(hits), [hits]);
@@ -306,7 +318,7 @@ export default function MonitorPreviewStage({
 
   useEffect(() => {
     updateLayout();
-  }, [mjpegSrc, format, imageSrc, annotateMode, updateLayout]);
+  }, [format, imageSrc, annotateMode, updateLayout]);
 
   useEffect(() => {
     if (!showVideo) return undefined;
@@ -321,12 +333,6 @@ export default function MonitorPreviewStage({
     };
   }, [showVideo, updateLayout]);
 
-  useEffect(() => {
-    if (format !== 'mjpeg' || showVideo) return undefined;
-    const tick = setInterval(updateLayout, 500);
-    return () => clearInterval(tick);
-  }, [format, showVideo, updateLayout]);
-
   const setFormat = (nextFormat) => {
     if (!STREAM_FORMATS.includes(nextFormat)) return;
     const next = { ...streamPrefs, format: nextFormat };
@@ -334,18 +340,7 @@ export default function MonitorPreviewStage({
     saveStreamPrefs(cameraId, next);
   };
 
-  const setHeight = (nextHeight) => {
-    const h = Number(nextHeight);
-    if (!STREAM_HEIGHTS.includes(h)) return;
-    const next = { ...streamPrefs, height: h };
-    setStreamPrefs(next);
-    saveStreamPrefs(cameraId, next);
-  };
-
-  const formatAvailable = (f) => {
-    if (f === 'mjpeg') return true;
-    return Boolean(playback?.formats?.[f]?.available);
-  };
+  const formatAvailable = (f) => Boolean(playback?.formats?.[f]?.available);
 
   const roiContext = useMemo(
     () => ({ inferRunning, hits: hitSet, alarms: alarmSet }),
@@ -450,21 +445,8 @@ export default function MonitorPreviewStage({
     <div className="monitor-stage">
       <div className="monitor-stage-main">
         <div className={`monitor-stage-viewport${busy && !hasMedia ? ' is-busy' : ''}`} ref={stageRef}>
-        {cameraId ? (
+        {cameraId && showVideo ? (
           <div className="monitor-stream-bar" role="group" aria-label="实时预览设置">
-            <select
-              className="monitor-stream-select"
-              value={height}
-              onChange={(e) => setHeight(Number(e.target.value))}
-              disabled={format !== 'mjpeg'}
-              title={format === 'mjpeg' ? '分辨率（MJPEG）' : '分辨率仅对 MJPEG 生效'}
-            >
-              {STREAM_HEIGHTS.map((h) => (
-                <option key={h} value={h}>
-                  {heightLabel(h)}
-                </option>
-              ))}
-            </select>
             <select
               className="monitor-stream-select"
               value={format}
@@ -477,6 +459,17 @@ export default function MonitorPreviewStage({
                 </option>
               ))}
             </select>
+            {onCaptureSnapshot ? (
+              <button
+                type="button"
+                className="monitor-stream-select monitor-stream-capture"
+                title="从当前预览抓帧保存缩略图"
+                disabled={captureBusy}
+                onClick={handleCaptureClick}
+              >
+                抓帧
+              </button>
+            ) : null}
           </div>
         ) : null}
 
@@ -611,4 +604,6 @@ export default function MonitorPreviewStage({
       </aside>
     </div>
   );
-}
+});
+
+export default MonitorPreviewStage;

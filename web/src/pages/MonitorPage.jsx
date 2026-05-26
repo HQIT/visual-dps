@@ -75,8 +75,48 @@ export default function MonitorPage() {
   const [shelfDrawerOpen, setShelfDrawerOpen] = useState(false);
   const [shelfDrawerForm, setShelfDrawerForm] = useState(emptyShelfForm);
   const [shelfDrawerSaving, setShelfDrawerSaving] = useState(false);
+  const previewRef = useRef(null);
+  const [captureBusy, setCaptureBusy] = useState(false);
   const annotateCanvasRef = useRef(null);
   const applyAnnotationPayloadRef = useRef(() => false);
+
+  const handleCaptureSnapshot = useCallback(
+    async (image, err) => {
+      if (err) {
+        alert(formatUserError(err.message) || '抓帧失败');
+        return;
+      }
+      if (!image || !monitorCamera?.id) return;
+      setCaptureBusy(true);
+      try {
+        const data = await apiPost(
+          `/api/cameras/${encodeURIComponent(monitorCamera.id)}/capture`,
+          { image },
+        );
+        if (data.status !== 'success') {
+          alert(formatUserError(data.error) || '抓帧失败');
+          return;
+        }
+        setMonitorCamera((prev) =>
+          prev
+            ? {
+                ...prev,
+                has_thumbnail: true,
+                last_frame_at: data.last_frame_at ?? prev.last_frame_at,
+                online: data.online ?? prev.online,
+                activity_seconds: data.activity_seconds ?? prev.activity_seconds,
+              }
+            : prev,
+        );
+      } catch (e) {
+        alert(formatUserError(e.message) || '抓帧失败');
+      } finally {
+        setCaptureBusy(false);
+      }
+    },
+    [monitorCamera?.id],
+  );
+
   const annotateTool = useAnnotateTool(annotateCanvasRef, {
     fixedCamera: monitorCamera
       ? { id: monitorCamera.id, name: monitorCamera.name, url: monitorCamera.url }
@@ -84,6 +124,7 @@ export default function MonitorPage() {
     embedded: true,
     streamOverlay: true,
     canvasActive: viewMode === 'annotate',
+    getBrowserCapture: () => previewRef.current?.captureSnapshot?.(),
   });
   applyAnnotationPayloadRef.current = annotateTool.applyAnnotationPayload;
   const [status, setStatus] = useState({
@@ -585,6 +626,49 @@ export default function MonitorPage() {
     };
   }, [cameraId, setUIStatus]);
 
+  const autoCaptureDoneRef = useRef(false);
+  useEffect(() => {
+    autoCaptureDoneRef.current = false;
+  }, [cameraId]);
+
+  useEffect(() => {
+    if (searchParams.get('capture') !== '1' || autoCaptureDoneRef.current) return undefined;
+    if (cameraLoadState !== 'ready' || viewMode !== 'monitor' || !playback) return undefined;
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      if (cancelled) return;
+      autoCaptureDoneRef.current = true;
+      try {
+        const image = previewRef.current?.captureSnapshot?.();
+        await handleCaptureSnapshot(image);
+      } catch (e) {
+        await handleCaptureSnapshot(null, e);
+      } finally {
+        setSearchParams(
+          (prev) => {
+            const next = new URLSearchParams(prev);
+            next.delete('capture');
+            return next;
+          },
+          { replace: true },
+        );
+      }
+    }, 4000);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [
+    searchParams,
+    cameraLoadState,
+    viewMode,
+    playback,
+    handleCaptureSnapshot,
+    setSearchParams,
+  ]);
+
   const refreshCameraMeta = useCallback(async () => {
     if (!cameraId) return;
     try {
@@ -866,8 +950,11 @@ export default function MonitorPage() {
 
       {monitorCamera ? (
         <MonitorPreviewStage
+          ref={previewRef}
           cameraId={cameraId}
           playback={playback}
+          onCaptureSnapshot={handleCaptureSnapshot}
+          captureBusy={captureBusy}
           boxes={annotation.boxes}
           shelves={annotation.shelves}
           gridShape={annotation.gridShape}

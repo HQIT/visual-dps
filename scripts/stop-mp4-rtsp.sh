@@ -50,6 +50,12 @@ stop_path() {
   fi
 }
 
+# 停止 cam9/cam10 等遗留推流（若存在）
+for extra in cam9 cam10; do
+  pkill -f "ffmpeg.*${RTSP_PORT}/${extra}" 2>/dev/null || true
+  rm -f "${SCRIPT_DIR}/.local/ffmpeg-mp4-rtsp-${extra}.pid"
+done
+
 for path in "${PATHS[@]}"; do
   stop_path "${path}"
 done

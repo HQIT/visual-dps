@@ -1,4 +1,4 @@
-"""可插拔推理后端：mmpose | mediapipe | rtmpose_onnx（RTMPose-t CPU）。"""
+"""可插拔推理后端：mmpose | mediapipe | rtmpose_onnx（RTMPose-t ONNX）。"""
 
 from __future__ import annotations
 

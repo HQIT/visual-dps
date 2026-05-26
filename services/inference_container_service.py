@@ -226,7 +226,11 @@ def _resolve_inference_image(client, backend: str) -> tuple[str, str]:
     if explicit:
         if _image_exists(client, explicit):
             eff = backend
-            if backend == BACKEND_MMPose and "lite" in explicit.lower():
+            if (
+                backend == BACKEND_MMPose
+                and "lite" in explicit.lower()
+                and "gpu" not in explicit.lower()
+            ):
                 eff = BACKEND_MEDIAPIPE
             return explicit, eff
         if _image_exists(client, INFERENCE_LITE_IMAGE):
@@ -234,15 +238,17 @@ def _resolve_inference_image(client, backend: str) -> tuple[str, str]:
             return INFERENCE_LITE_IMAGE, fallback
         return explicit, backend
 
-    if backend in _LITE_BACKENDS:
-        use_gpu = os.environ.get("INFERENCE_USE_GPU", "0") == "1"
+    use_gpu = os.environ.get("INFERENCE_USE_GPU", "0") == "1"
+    gpu_lite_backends = _LITE_BACKENDS | {BACKEND_MMPose}
+    if backend in gpu_lite_backends:
         if use_gpu and _image_exists(client, INFERENCE_LITE_GPU_IMAGE):
             return INFERENCE_LITE_GPU_IMAGE, backend
-        if _image_exists(client, INFERENCE_LITE_IMAGE):
+        if backend in _LITE_BACKENDS and _image_exists(client, INFERENCE_LITE_IMAGE):
             return INFERENCE_LITE_IMAGE, backend
         if use_gpu:
             return INFERENCE_LITE_GPU_IMAGE, backend
-        return INFERENCE_LITE_IMAGE, backend
+        if backend in _LITE_BACKENDS:
+            return INFERENCE_LITE_IMAGE, backend
 
     if _image_exists(client, INFERENCE_IMAGE):
         return INFERENCE_IMAGE, BACKEND_MMPose
@@ -306,13 +312,16 @@ def start_inference_container(camera: dict, request=None) -> dict:
         "INFERENCE_HEIGHT": str(effective.get("inference.height", 480)),
         "INFERENCE_POSE_FRAME_INTERVAL": str(effective.get("inference.pose_frame_interval", 3)),
         "INFERENCE_DEBUG_VISUAL": "1" if effective.get("debug-info.enabled") else "0",
-        "RTSP_CAPTURE_BACKEND": os.environ.get("RTSP_CAPTURE_BACKEND", "auto"),
-        # 与 event-worker 的 POSE_DELIVERY=stream 对齐（推理 XADD pose:stream）
         "POSE_DELIVERY": os.environ.get("POSE_DELIVERY", "stream").strip() or "stream",
         "POSE_STREAM_KEY": os.environ.get("POSE_STREAM_KEY", "pose:stream"),
         "POSE_STREAM_GROUP": os.environ.get("POSE_STREAM_GROUP", "event-workers"),
         "POSE_STREAM_MAXLEN": os.environ.get("POSE_STREAM_MAXLEN", "2000"),
     }
+    for key in ("RTSP_DECODE_PROFILE", "RTSP_HWACCEL_DEVICE", "FFMPEG_BIN"):
+        val = os.environ.get(key, "").strip()
+        if val:
+            env[key] = val
+
     redis_url = os.environ.get("REDIS_URL", "").strip()
     if redis_url:
         env["REDIS_URL"] = redis_url
@@ -328,6 +337,7 @@ def start_inference_container(camera: dict, request=None) -> dict:
     device_requests = []
     use_gpu = os.environ.get("INFERENCE_USE_GPU", "0") == "1"
     if use_gpu:
+        env["INFERENCE_USE_GPU"] = "1"
         device_requests.append(docker.types.DeviceRequest(count=-1, capabilities=[["gpu"]]))
 
     run_kwargs: dict = {

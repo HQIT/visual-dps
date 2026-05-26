@@ -1,278 +1,221 @@
-"""RTSP 低延迟采帧：OpenCV 或 FFmpeg（硬件解码自适应）。"""
+"""RTSP 采帧：PyAV 进程内解码（FFmpeg 硬/软解自适应）。"""
 
 from __future__ import annotations
 
 import os
-import subprocess
-import threading
 import time
-from typing import Tuple
+from typing import Iterator, Tuple
 
-import cv2
+import av
 import numpy as np
 
-from services.hwaccel_probe import probe_ffmpeg_decode_profile, probe_summary
+from services.hwaccel_probe import FfmpegDecodeProfile, probe_ffmpeg_decode_profile, probe_summary
 
-_DEFAULT_FFMPEG_OPTS = "rtsp_transport;tcp|fflags;nobuffer|flags;low_delay|max_delay;0"
-_LOW_LATENCY_FFMPEG_OPTS = os.environ.get("OPENCV_FFMPEG_CAPTURE_OPTIONS", _DEFAULT_FFMPEG_OPTS)
-_DRAIN_MAX = max(2, int(os.environ.get("RTSP_DRAIN_MAX", "12")))
-
-
-def apply_low_latency_ffmpeg_env() -> None:
-    os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = _LOW_LATENCY_FFMPEG_OPTS
-
-
-def _backend_mode() -> str:
-    mode = os.environ.get("RTSP_CAPTURE_BACKEND", "auto").strip().lower()
-    if mode in ("opencv", "ffmpeg"):
-        return mode
-    profile = probe_ffmpeg_decode_profile()
-    if profile.name != "software":
-        return "ffmpeg"
-    if os.environ.get("RTSP_FFMPEG_FORCE", "").strip().lower() in ("1", "true", "yes"):
-        return "ffmpeg"
-    return "opencv"
+_DEFAULT_OPEN_OPTS = {
+    "rtsp_transport": "tcp",
+    "fflags": "nobuffer",
+    "flags": "low_delay",
+    "max_delay": "0",
+    "stimeout": "5000000",
+}
 
 
-class _FfmpegRtspCapture:
-    """子进程 FFmpeg 解码，后台线程只保留最新一帧。"""
+def _build_open_options(profile: FfmpegDecodeProfile) -> dict[str, str]:
+    opts = dict(_DEFAULT_OPEN_OPTS)
+    if profile.name == "software":
+        return opts
+
+    args = profile.input_args
+    i = 0
+    while i < len(args):
+        key = args[i]
+        if key == "-hwaccel" and i + 1 < len(args):
+            opts["hwaccel"] = args[i + 1]
+            i += 2
+            continue
+        if key == "-hwaccel_device" and i + 1 < len(args):
+            opts["hwaccel_device"] = args[i + 1]
+            i += 2
+            continue
+        i += 1
+
+    device = os.environ.get("RTSP_HWACCEL_DEVICE", "").strip()
+    if device and "hwaccel" in opts:
+        opts["hwaccel_device"] = device
+
+    if profile.video_codec:
+        opts["codec"] = profile.video_codec
+
+    return opts
+
+
+def _profiles_to_try() -> list[FfmpegDecodeProfile]:
+    forced = os.environ.get("RTSP_DECODE_PROFILE", "").strip().lower()
+    if forced in ("software", "cpu"):
+        return [FfmpegDecodeProfile(name="software")]
+
+    primary = probe_ffmpeg_decode_profile()
+    if primary.name == "software":
+        return [primary]
+
+    # 硬解优先，失败再软解
+    return [
+        primary,
+        FfmpegDecodeProfile(name="software"),
+    ]
+
+
+def _frame_to_bgr(frame: av.VideoFrame) -> np.ndarray:
+    return frame.to_ndarray(format="bgr24")
+
+
+class PyAvRtspCapture:
+    """推理会话内持久 RTSP 连接，按 frame_rate 节拍同步 read_frame()。"""
 
     def __init__(self, url: str):
         self.url = url
-        self._profile = probe_ffmpeg_decode_profile()
+        self._container: av.container.InputContainer | None = None
+        self._stream: av.video.stream.VideoStream | None = None
+        self._decoder: Iterator[av.VideoFrame] | None = None
         self._width = 0
         self._height = 0
-        self._proc: subprocess.Popen | None = None
-        self._lock = threading.Lock()
-        self._latest: np.ndarray | None = None
-        self._opened = False
-        self._reader: threading.Thread | None = None
-        self._stop = threading.Event()
+        self._fps = 25.0
+        self._decode_label = "software"
 
     def isOpened(self) -> bool:
-        return self._opened
+        return self._container is not None and self._stream is not None
 
-    def _probe_size(self) -> tuple[int, int]:
-        ffprobe = os.environ.get("FFPROBE_BIN", "ffprobe").strip() or "ffprobe"
-        try:
-            proc = subprocess.run(
-                [
-                    ffprobe,
-                    "-v",
-                    "error",
-                    "-rtsp_transport",
-                    "tcp",
-                    "-select_streams",
-                    "v:0",
-                    "-show_entries",
-                    "stream=width,height",
-                    "-of",
-                    "csv=p=0:s=x",
-                    self.url,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=12.0,
-                check=False,
-            )
-            line = (proc.stdout or "").strip().splitlines()[0] if proc.stdout else ""
-            if "x" in line:
-                w, h = line.split("x", 1)
-                return max(2, int(w)), max(2, int(h))
-        except Exception:
-            pass
-        return 640, 360
-
-    def _build_cmd(self) -> list[str]:
-        ffmpeg = os.environ.get("FFMPEG_BIN", "ffmpeg").strip() or "ffmpeg"
-        cmd = [
-            ffmpeg,
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-rtsp_transport",
-            "tcp",
-            "-fflags",
-            "nobuffer",
-            "-flags",
-            "low_delay",
-            "-max_delay",
-            "0",
-        ]
-        cmd.extend(self._profile.input_args)
-        if self._profile.video_codec:
-            cmd.extend(["-c:v", self._profile.video_codec])
-        cmd.extend(["-i", self.url, "-an", "-vf", self._profile.output_vf])
-        cmd.extend(
-            [
-                "-f",
-                "rawvideo",
-                "-pix_fmt",
-                "bgr24",
-                "pipe:1",
-            ]
+    def _open_with_options(self, opts: dict[str, str], label: str) -> bool:
+        self._container = av.open(
+            self.url,
+            mode="r",
+            format="rtsp",
+            options=opts,
+            timeout=(float(os.environ.get("RTSP_OPEN_TIMEOUT_SEC", "8")), None),
         )
-        return cmd
+        self._stream = self._container.streams.video[0]
+        self._stream.thread_type = "AUTO"
+        ctx = self._stream.codec_context
+        self._width = int(ctx.width or 0)
+        self._height = int(ctx.height or 0)
+        if self._stream.average_rate:
+            self._fps = float(self._stream.average_rate)
+        elif self._stream.base_rate:
+            self._fps = float(self._stream.base_rate)
+        self._decoder = self._container.decode(video=0)
+        self._decode_label = label
+        return self._width > 0 and self._height > 0
 
     def open(self) -> bool:
-        self._width, self._height = self._probe_size()
-        cmd = self._build_cmd()
-        try:
-            self._proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                bufsize=10**7,
-            )
-        except Exception:
-            return False
-        self._opened = True
-        self._reader = threading.Thread(target=self._read_loop, name="ffmpeg-rtsp-reader", daemon=True)
-        self._reader.start()
-        return True
-
-    def _read_loop(self) -> None:
-        assert self._proc is not None and self._proc.stdout is not None
-        frame_bytes = self._width * self._height * 3
-        stdout = self._proc.stdout
-        while not self._stop.is_set():
-            buf = stdout.read(frame_bytes)
-            if not buf or len(buf) < frame_bytes:
-                break
-            frame = np.frombuffer(buf, dtype=np.uint8).reshape((self._height, self._width, 3))
-            with self._lock:
-                self._latest = frame.copy()
-
-    def grab(self) -> bool:
-        with self._lock:
-            return self._latest is not None
-
-    def retrieve(self) -> tuple[bool, np.ndarray | None]:
-        with self._lock:
-            if self._latest is None:
-                return False, None
-            return True, self._latest.copy()
-
-    def read(self) -> tuple[bool, np.ndarray | None]:
-        deadline = time.time() + float(os.environ.get("RTSP_OPEN_TIMEOUT_SEC", "8"))
-        while time.time() < deadline:
-            ok, frame = self.retrieve()
-            if ok and frame is not None:
-                return True, frame
-            time.sleep(0.02)
-        return False, None
+        last_exc: Exception | None = None
+        for profile in _profiles_to_try():
+            opts = _build_open_options(profile)
+            label = profile.name
+            try:
+                if self._open_with_options(opts, label):
+                    print(f"ℹ️ RTSP 采帧: pyav decode={label} ({probe_summary()})")
+                    return True
+            except Exception as exc:
+                last_exc = exc
+                print(f"⚠️ PyAV RTSP 打开失败 ({label}): {exc}")
+                self.release()
+        if last_exc is not None:
+            print(f"⚠️ PyAV RTSP 全部尝试失败: {last_exc}")
+        return False
 
     def get(self, prop: int) -> float:
+        import cv2
+
         if prop == cv2.CAP_PROP_FRAME_WIDTH:
             return float(self._width)
         if prop == cv2.CAP_PROP_FRAME_HEIGHT:
             return float(self._height)
         if prop == cv2.CAP_PROP_FPS:
-            return 25.0
+            return float(self._fps)
         return 0.0
 
-    def release(self) -> None:
-        self._stop.set()
-        if self._proc is not None:
+    def read_frame(self) -> Tuple[bool, np.ndarray | None, float]:
+        if not self.isOpened() or self._decoder is None:
+            return False, None, time.time()
+        deadline = time.time() + float(os.environ.get("RTSP_READ_TIMEOUT_SEC", "5"))
+        while time.time() < deadline:
             try:
-                self._proc.terminate()
-                self._proc.wait(timeout=2.0)
-            except Exception:
-                try:
-                    self._proc.kill()
-                except Exception:
-                    pass
-            self._proc = None
-        self._opened = False
-
-
-class _OpencvCaptureAdapter:
-    def __init__(self, cap: cv2.VideoCapture):
-        self._cap = cap
-
-    def isOpened(self) -> bool:
-        return self._cap.isOpened()
-
-    def grab(self) -> bool:
-        return self._cap.grab()
-
-    def retrieve(self) -> tuple[bool, np.ndarray | None]:
-        return self._cap.retrieve()
-
-    def read(self) -> tuple[bool, np.ndarray | None]:
-        return self._cap.read()
-
-    def get(self, prop: int) -> float:
-        return float(self._cap.get(prop))
-
-    def set(self, prop: int, value: float) -> bool:
-        return bool(self._cap.set(prop, value))
+                frame = next(self._decoder)
+            except StopIteration:
+                break
+            except av.AVError:
+                break
+            if frame is not None:
+                return True, _frame_to_bgr(frame), time.time()
+        return False, None, time.time()
 
     def release(self) -> None:
-        self._cap.release()
+        if self._container is not None:
+            try:
+                self._container.close()
+            except Exception:
+                pass
+        self._container = None
+        self._stream = None
+        self._decoder = None
 
 
-def open_rtsp_capture(url: str, buffer_size: int = 1):
-    mode = _backend_mode()
-    if mode == "ffmpeg":
-        cap = _FfmpegRtspCapture(url)
-        if cap.open():
-            print(f"ℹ️ RTSP 采帧: ffmpeg ({probe_summary()})")
-            return cap
-        cap.release()
-        print("⚠️ FFmpeg RTSP 打开失败，回退 OpenCV")
-
-    apply_low_latency_ffmpeg_env()
-    cv_cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
-    try:
-        cv_cap.set(cv2.CAP_PROP_BUFFERSIZE, max(1, int(buffer_size)))
-    except Exception:
-        pass
-    print(f"ℹ️ RTSP 采帧: opencv-ffmpeg ({probe_summary()})")
-    return _OpencvCaptureAdapter(cv_cap)
-
-
-def drain_capture_buffer(cap, max_grabs: int | None = None) -> int:
-    limit = _DRAIN_MAX if max_grabs is None else max(1, int(max_grabs))
-    grabbed = 0
-    for _ in range(limit):
-        if not cap.grab():
-            break
-        grabbed += 1
-    return grabbed
-
-
-def read_latest_frame(cap, max_drain: int | None = None) -> Tuple[bool, np.ndarray | None, float]:
-    limit = _DRAIN_MAX if max_drain is None else max(1, int(max_drain))
-    grabbed = False
-    for _ in range(limit):
-        if not cap.grab():
-            break
-        grabbed = True
-    if not grabbed:
-        ok, frame = cap.read()
-        return ok, frame, time.time()
-    ok, frame = cap.retrieve()
-    return ok, frame, time.time()
+def open_rtsp_capture(url: str, buffer_size: int = 1) -> PyAvRtspCapture:
+    _ = buffer_size  # PyAV 无 OpenCV 式 buffer；节拍由推理侧 frame_rate 控制
+    cap = PyAvRtspCapture(url)
+    if not cap.open():
+        raise RuntimeError(f"failed to open RTSP stream: {url}")
+    return cap
 
 
 def read_rtsp_frame_once(url: str, timeout_sec: float | None = None) -> np.ndarray | None:
-    """低频抓一帧（UI 缩略图等）。Docker 内 FFmpeg 硬解常能连上 RTSP 但读不到帧，此处固定 OpenCV。"""
+    """按需读一帧（UI 缩略图等，与推理 pipeline 无关）。"""
     if timeout_sec is not None:
-        os.environ["RTSP_OPEN_TIMEOUT_SEC"] = str(timeout_sec)
-    prev_backend = os.environ.get("RTSP_CAPTURE_BACKEND")
-    os.environ["RTSP_CAPTURE_BACKEND"] = "opencv"
-    try:
-        cap = open_rtsp_capture(url, buffer_size=1)
+        prev = os.environ.get("RTSP_READ_TIMEOUT_SEC")
+        os.environ["RTSP_READ_TIMEOUT_SEC"] = str(max(1.0, float(timeout_sec)))
         try:
-            if not cap.isOpened():
-                return None
-            ok, frame, _ = read_latest_frame(cap, max_drain=4)
-            return frame if ok and frame is not None else None
+            return _read_once(url)
         finally:
-            cap.release()
+            if prev is None:
+                os.environ.pop("RTSP_READ_TIMEOUT_SEC", None)
+            else:
+                os.environ["RTSP_READ_TIMEOUT_SEC"] = prev
+    return _read_once(url)
+
+
+def _read_once(url: str) -> np.ndarray | None:
+    cap = PyAvRtspCapture(url)
+    if not cap.open():
+        return None
+    try:
+        ok, frame, _ = cap.read_frame()
+        return frame if ok and frame is not None else None
     finally:
-        if prev_backend is None:
-            os.environ.pop("RTSP_CAPTURE_BACKEND", None)
-        else:
-            os.environ["RTSP_CAPTURE_BACKEND"] = prev_backend
+        cap.release()
+
+
+def read_latest_frame(cap: PyAvRtspCapture) -> Tuple[bool, np.ndarray | None, float]:
+    """兼容旧 inference_service 的 OpenCV 式 API。"""
+    return cap.read_frame()
+
+
+def drain_capture_buffer(cap: PyAvRtspCapture) -> None:
+    """跳帧：解一帧丢弃（节拍由 frame_rate 控制，非 drain 积压）。"""
+    cap.read_frame()
+
+
+def probe_rtsp_available(url: str, timeout_sec: float = 6.0) -> bool:
+    """探测 RTSP 是否可打开（不解码完整帧，用于在线状态）。"""
+    opts = {
+        "rtsp_transport": "tcp",
+        "analyzeduration": "1000000",
+        "probesize": "32768",
+        "stimeout": str(int(max(1.0, timeout_sec) * 1_000_000)),
+    }
+    try:
+        container = av.open(url, mode="r", format="rtsp", options=opts, timeout=(timeout_sec, None))
+        ok = bool(container.streams.video)
+        container.close()
+        return ok
+    except Exception:
+        return False

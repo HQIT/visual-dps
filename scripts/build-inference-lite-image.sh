@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT}"
 
 echo "==> 构建 visual-dps-inference-lite ..."
-docker compose --profile inference-lite build visual-dps-inference-lite
+docker compose --profile build-only build visual-dps-inference-lite
 
 echo ""
 echo "完成。启动 UI 并指定轻量推理镜像："

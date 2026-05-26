@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 
 import numpy as np
 from mmdet.apis import init_detector, inference_detector
@@ -30,7 +31,23 @@ class MMPoseBackend:
 
         print("🚀 正在加载 MMDet/MMPose 模型...")
         models_cfg = self.app_config["models"]
-        device = models_cfg["device"]
+        device = str(models_cfg.get("device") or "cuda:0").strip()
+        if os.environ.get("INFERENCE_USE_GPU", "0") == "1":
+            if device.lower() in ("", "cpu"):
+                device = "cuda:0"
+        try:
+            import torch
+
+            if device.startswith("cuda") and not torch.cuda.is_available():
+                raise RuntimeError(
+                    "MMPose 需要 CUDA，但当前容器内 torch.cuda.is_available()=False；"
+                    "请使用 visual-dps-inference-lite-gpu 镜像并 docker run --gpus all"
+                )
+        except ImportError as exc:
+            raise RuntimeError(
+                "MMPose 需要 PyTorch，请使用 visual-dps-inference-lite-gpu 或 visual-dps-inference 镜像"
+            ) from exc
+        print(f"ℹ️ MMPose device={device}")
         self.det_model = init_detector(
             models_cfg["det_config"],
             models_cfg["det_checkpoint"],

@@ -1,0 +1,137 @@
+# 重依赖固定基座：PyTorch/CUDA、FFmpeg、mmpose/mmcv、ONNX 模型等（极少重建）
+# 构建: ./scripts/build-inference-lite-gpu-base.sh
+# 产物: visual-dps-inference-lite-gpu-base:latest
+
+FROM pytorch/pytorch:2.1.2-cuda12.1-cudnn8-runtime
+
+ARG APT_MIRROR=mirrors.aliyun.com
+ARG PIP_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG GITHUB_PROXY_BASE=https://ghfast.top
+ARG MEDIAPIPE_MODEL_URL=https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task
+ARG RTMPOSE_ONNX_DET_ZIP=https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/rtmdet_nano_8xb32-100e_coco-obj365-person-05d8511e.zip
+ARG RTMPOSE_ONNX_POSE_ZIP=https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/rtmpose-t_simcc-body7_pt-body7_420e-256x192-026a1439_20230504.zip
+ARG MMDET_CKPT_URL=https://download.openmmlab.com/mmpose/v1/projects/rtmpose/rtmdet_m_8xb32-100e_coco-obj365-person-235e8209.pth
+ARG MMPOSE_CKPT_URL=https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/rtmpose-m_simcc-body7_pt-body7_420e-256x192-e48f03d0_20230504.pth
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    INFERENCE_USE_GPU=1 \
+    NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,video,utility \
+    LD_LIBRARY_PATH=/opt/conda/lib/python3.10/site-packages/torch/lib:/opt/conda/lib \
+    DEBIAN_FRONTEND=noninteractive \
+    HTTP_PROXY=${HTTP_PROXY} \
+    HTTPS_PROXY=${HTTPS_PROXY}
+
+WORKDIR /app
+
+COPY docker/ubuntu-mirror.sh /tmp/ubuntu-mirror.sh
+RUN sh /tmp/ubuntu-mirror.sh "${APT_MIRROR}" && rm /tmp/ubuntu-mirror.sh
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget \
+    xz-utils \
+    unzip \
+    ca-certificates \
+    libgl1 \
+    libglib2.0-0 \
+    libgles2 \
+    libegl1 \
+    libgbm1 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && apt-get install -y --no-install-recommends dpkg \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY docker/install-ffmpeg-cuda.sh /tmp/install-ffmpeg-cuda.sh
+COPY docker/prebuild/jellyfin-ffmpeg7_7.1.3-6-jammy_amd64.deb /tmp/jellyfin-ffmpeg.deb
+COPY docker/prebuild/ffmpeg-master-latest-linux64-gpl.tar.xz /tmp/ffmpeg-soft.tar.xz
+RUN chmod +x /tmp/install-ffmpeg-cuda.sh \
+    && sh /tmp/install-ffmpeg-cuda.sh /tmp/jellyfin-ffmpeg.deb /tmp/ffmpeg-soft.tar.xz \
+    && rm -f /tmp/install-ffmpeg-cuda.sh /tmp/jellyfin-ffmpeg.deb /tmp/ffmpeg-soft.tar.xz
+
+ENV LD_LIBRARY_PATH=/usr/lib/jellyfin-ffmpeg/lib:${LD_LIBRARY_PATH} \
+    RTSP_DECODE_PROFILE=cuda \
+    RTSP_HWACCEL_DEVICE=0 \
+    FFMPEG_BIN=/usr/local/bin/ffmpeg
+
+COPY docker/pip-install.sh /tmp/pip-install.sh
+RUN sh /tmp/pip-install.sh "${PIP_INDEX}" --upgrade pip setuptools wheel \
+    && sh /tmp/pip-install.sh "${PIP_INDEX}" "numpy<2" \
+    && sh /tmp/pip-install.sh "${PIP_INDEX}" \
+        mediapipe \
+        rtmlib \
+        opencv-python-headless \
+        fastapi \
+        "uvicorn[standard]" \
+        python-multipart \
+        httpx \
+        itsdangerous \
+        redis \
+        psutil \
+        av \
+        "passlib[bcrypt]" \
+        "bcrypt<4.1"
+
+RUN sh /tmp/pip-install.sh "${PIP_INDEX}" openmim \
+    && mim install "mmengine>=0.10.0" "mmcv>=2.0.0,<2.2.0" "mmdet>=3.0.0,<3.4.0" \
+    && sh /tmp/pip-install.sh "${PIP_INDEX}" --no-build-isolation chumpy \
+    && mim install "mmpose>=1.3.0,<1.4.0"
+
+ARG ORT_CUDA12_INDEX=https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/
+RUN sh /tmp/pip-install.sh "${PIP_INDEX}" --extra-index-url "${ORT_CUDA12_INDEX}" \
+        --force-reinstall "onnxruntime-gpu==1.18.0"
+
+RUN python - <<'PY'
+import os
+import shutil
+import mmdet
+import mmpose
+
+os.makedirs("/app/configs", exist_ok=True)
+for pkg, sub in ((mmdet, "mmdet"), (mmpose, "mmpose")):
+    src = os.path.join(os.path.dirname(pkg.__file__), ".mim", "configs")
+    dst = os.path.join("/app/configs", sub)
+    if os.path.isdir(src):
+        if os.path.exists(dst):
+            shutil.rmtree(dst)
+        shutil.copytree(src, dst)
+
+mmpose_root = os.path.dirname(mmpose.__file__)
+det_src = os.path.join(
+    mmpose_root, ".mim", "demo", "mmdetection_cfg", "rtmdet_m_640-8xb32_coco-person.py"
+)
+det_dst = "/app/configs/mmdet/rtmdet_m_640-8xb32_coco-person.py"
+shutil.copy2(det_src, det_dst)
+pose_src = "/app/configs/mmpose/body_2d_keypoint/rtmpose/body8/rtmpose-m_8xb256-420e_body8-256x192.py"
+for p in (det_dst, pose_src):
+    if not os.path.isfile(p):
+        raise SystemExit(f"MMPose 配置缺失: {p}")
+print("MMPose config paths: OK")
+PY
+
+RUN mkdir -p /app/localdata/models/pose_landmarker \
+    /app/localdata/models/rtmpose_onnx/rtmdet_nano \
+    /app/localdata/models/rtmpose_onnx/rtmpose_t \
+    /app/localdata/models/mmpose \
+    && wget -q -O /app/localdata/models/pose_landmarker_lite.task "${MEDIAPIPE_MODEL_URL}" \
+    && wget -q -O /tmp/rtmdet_nano.zip "${RTMPOSE_ONNX_DET_ZIP}" \
+    && unzip -q -j /tmp/rtmdet_nano.zip '*/end2end.onnx' -d /app/localdata/models/rtmpose_onnx/rtmdet_nano \
+    && wget -q -O /tmp/rtmpose_t.zip "${RTMPOSE_ONNX_POSE_ZIP}" \
+    && unzip -q -j /tmp/rtmpose_t.zip '*/end2end.onnx' -d /app/localdata/models/rtmpose_onnx/rtmpose_t \
+    && wget -q -O /app/localdata/models/mmpose/rtmdet_m_coco-person.pth "${MMDET_CKPT_URL}" \
+    && wget -q -O /app/localdata/models/mmpose/rtmpose-m_body7.pth "${MMPOSE_CKPT_URL}" \
+    && rm -f /tmp/rtmdet_nano.zip /tmp/rtmpose_t.zip
+
+RUN python - <<'PY'
+import onnxruntime as ort
+
+print("onnxruntime", ort.__version__, "available:", ort.get_available_providers())
+assert ort.__version__.startswith("1.18"), ort.__version__
+PY
+
+LABEL org.opencontainers.image.title="visual-dps-inference-lite-gpu-base" \
+      org.opencontainers.image.description="Fixed deps: mmpose/mmcv/ffmpeg/models — rebuild rarely"

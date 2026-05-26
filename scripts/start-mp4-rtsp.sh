@@ -10,9 +10,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 MTX_CONTAINER="${MEDIAMTX_CONTAINER:-visual-dps-mediamtx}"
 
-DEFAULT_VIDEO="/mnt/c/Users/sugar/Videos/33611ddf17439fe92fa3620b1fe6da92.mp4"
+DEFAULT_VIDEO="${ROOT}/multi-samples.mp4"
 VIDEO="${1:-${DEFAULT_VIDEO}}"
-PATH_NAME="${2:-cam2}"
+PATH_NAME="${2:-cam1}"
 
 RTSP_PORT="${MEDIAMTX_RTSP_PORT:-8554}"
 if [[ -f "${ROOT}/.env" ]]; then

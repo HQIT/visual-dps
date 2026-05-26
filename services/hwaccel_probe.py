@@ -82,7 +82,7 @@ def probe_ffmpeg_decode_profile() -> FfmpegDecodeProfile:
     if forced in ("cuda", "nvidia", "cuvid"):
         return FfmpegDecodeProfile(
             name="cuda",
-            input_args=("-hwaccel", "cuda"),
+            input_args=("-hwaccel", "cuda", "-hwaccel_device", os.environ.get("RTSP_HWACCEL_DEVICE", "0")),
             video_codec="h264_cuvid",
             output_vf="hwdownload,format=bgr24",
         )

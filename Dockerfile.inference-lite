@@ -10,8 +10,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     INFERENCE_BACKEND=mediapipe \
-    INFERENCE_USE_GPU=0 \
-    RTSP_CAPTURE_BACKEND=auto
+    INFERENCE_USE_GPU=0
 
 WORKDIR /app
 
@@ -43,6 +42,7 @@ RUN sh /tmp/pip-install.sh "${PIP_INDEX}" --upgrade pip \
         httpx \
         itsdangerous \
         redis \
+        av \
         "passlib[bcrypt]" \
         "bcrypt<4.1"
 

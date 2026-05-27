@@ -13,6 +13,7 @@ from services.mediamtx_service import (
     SOURCE_RTSP_PULL,
     SOURCE_V4L2,
     build_playback_url,
+    encode_rtsp_url_credentials,
     path_from_url,
     sync_mediamtx_config,
 )
@@ -75,7 +76,7 @@ def _normalize_record(raw: dict) -> dict | None:
         "source_type": source_type,
         "enabled": bool(raw.get("enabled", True)),
         "device": str(raw.get("device") or "/dev/video0").strip(),
-        "pull_url": str(raw.get("pull_url") or "").strip(),
+        "pull_url": encode_rtsp_url_credentials(str(raw.get("pull_url") or "").strip()),
         "video_size": str(raw.get("video_size") or "640x480").strip(),
         "framerate": int(raw.get("framerate") or 15),
     }

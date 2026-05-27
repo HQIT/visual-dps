@@ -1,5 +1,6 @@
 export const STREAM_FORMATS = ['webrtc', 'hls'];
-export const DEFAULT_STREAM_PREFS = { format: 'webrtc' };
+/** 默认 HLS：海康 H.264 主码流在 mpegts 下稳定；WebRTC 对 HEVC 常报 codecs not supported */
+export const DEFAULT_STREAM_PREFS = { format: 'hls' };
 
 function storageKey(cameraId) {
   return `monitorStreamPrefs:${cameraId}`;

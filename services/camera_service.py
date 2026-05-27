@@ -97,6 +97,10 @@ def probe_camera_online(url: str, camera: dict | None = None) -> bool:
 
     if camera and mediamtx_path_ready_for_camera(camera):
         return True
+    if camera:
+        slug = str(camera.get("path") or camera.get("id") or "").strip()
+        if slug and mediamtx_path_ready(slug):
+            return True
     slug = path_from_url(url)
     if slug and mediamtx_path_ready(slug):
         return True

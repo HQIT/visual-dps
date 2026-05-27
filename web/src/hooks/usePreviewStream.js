@@ -2,6 +2,18 @@ import { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
 import { startWhep, stopWhep } from '../lib/whepClient';
 
+function formatCodecPlaybackError(message) {
+  const raw = String(message || '');
+  if (!/codec|not supported by client|H265|HEVC|hev1|hvc1/i.test(raw)) {
+    return raw;
+  }
+  return (
+    '当前浏览器无法解码该路视频编码（多为 H.265/HEVC）。' +
+    '请在摄像机 Web 将码流改为 H.264，或 pull_url 使用已改为 H.264 的通道（如 Channels/101），' +
+    '同步 MediaMTX 后优先用 HLS 播放；子码流仍为 HEVC 时 WebRTC/HLS 均可能失败。'
+  );
+}
+
 /** 按格式驱动 video 预览源（HLS / WebRTC，经 MediaMTX） */
 export function usePreviewStream({ format, playback, videoRef, enabled = true }) {
   const hlsRef = useRef(null);
@@ -48,9 +60,13 @@ export function usePreviewStream({ format, playback, videoRef, enabled = true })
           video.play().catch(() => {});
         });
         hls.on(Hls.Events.ERROR, (_, data) => {
-          if (data.fatal) {
-            setStreamError(`HLS 播放失败: ${data.details || data.type}`);
-          }
+          if (!data.fatal) return;
+          const detail = data.details || data.type || '';
+          setStreamError(
+            /bufferAppend|manifest|codec|H265|HEVC/i.test(String(detail))
+              ? formatCodecPlaybackError(detail)
+              : `HLS 播放失败: ${detail}`,
+          );
         });
         hls.loadSource(hlsUrl);
         hls.attachMedia(video);
@@ -74,7 +90,7 @@ export function usePreviewStream({ format, playback, videoRef, enabled = true })
       (async () => {
         try {
           const session = await startWhep(whepUrl, video, (msg) => {
-            if (!cancelled) setStreamError(msg);
+            if (!cancelled) setStreamError(formatCodecPlaybackError(msg));
           });
           if (cancelled) {
             stopWhep(session);
@@ -87,7 +103,7 @@ export function usePreviewStream({ format, playback, videoRef, enabled = true })
             if (err?.name === 'TypeError' && /fetch|network/i.test(msg)) {
               setStreamError('无法连接 WebRTC 信令，请确认 MediaMTX 已启动（8889）');
             } else {
-              setStreamError(msg);
+              setStreamError(formatCodecPlaybackError(msg));
             }
           }
         }

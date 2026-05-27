@@ -5,7 +5,7 @@ import os
 import urllib.error
 import urllib.request
 from typing import List
-from urllib.parse import urlparse
+from urllib.parse import quote, unquote, urlparse
 
 MEDIAMTX_RTSP_HOST = os.environ.get("MEDIAMTX_RTSP_HOST", "127.0.0.1")
 MEDIAMTX_INTERNAL_HOST = os.environ.get("MEDIAMTX_INTERNAL_HOST", "mediamtx")
@@ -23,6 +23,28 @@ SOURCE_PUBLISHER = "publisher"
 SOURCE_EXTERNAL = "external"
 
 MANAGED_SOURCE_TYPES = {SOURCE_V4L2, SOURCE_RTSP_PULL, SOURCE_PUBLISHER}
+
+
+def encode_rtsp_url_credentials(url: str) -> str:
+    """RTSP URL 中密码含 , @ # 等须百分号编码，否则 FFmpeg/MediaMTX 认证失败。"""
+    s = str(url or "").strip()
+    if not s:
+        return s
+    lower = s.lower()
+    if not (lower.startswith("rtsp://") or lower.startswith("rtsps://")):
+        return s
+    scheme_end = s.index("://") + 3
+    rest = s[scheme_end:]
+    if "@" not in rest:
+        return s
+    userinfo, authority = rest.rsplit("@", 1)
+    if ":" not in userinfo:
+        user_enc = quote(unquote(userinfo), safe="")
+        return f"{s[:scheme_end]}{user_enc}@{authority}"
+    user, passwd = userinfo.split(":", 1)
+    user_enc = quote(unquote(user), safe="")
+    pass_enc = quote(unquote(passwd), safe="")
+    return f"{s[:scheme_end]}{user_enc}:{pass_enc}@{authority}"
 
 
 def build_playback_url(path: str, host: str | None = None, port: int | None = None) -> str:
@@ -231,7 +253,7 @@ def generate_mediamtx_yaml(cameras: List[dict]) -> str:
             continue
 
         if source_type == SOURCE_RTSP_PULL:
-            pull_url = str(cam.get("pull_url") or "").strip()
+            pull_url = encode_rtsp_url_credentials(str(cam.get("pull_url") or "").strip())
             lines.append(f"    source: {pull_url}")
         elif source_type == SOURCE_PUBLISHER:
             lines.append("    source: publisher")
@@ -278,7 +300,7 @@ def camera_to_path_conf(cam: dict) -> dict:
             return {"source": "publisher"}
         return {}
     if source_type == SOURCE_RTSP_PULL:
-        return {"source": str(cam.get("pull_url") or "").strip()}
+        return {"source": encode_rtsp_url_credentials(str(cam.get("pull_url") or "").strip())}
     if source_type == SOURCE_PUBLISHER:
         return {"source": "publisher"}
     if source_type == SOURCE_V4L2:

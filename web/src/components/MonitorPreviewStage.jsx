@@ -230,7 +230,14 @@ const MonitorPreviewStage = forwardRef(function MonitorPreviewStage({
     const ok =
       (prefs.format === 'hls' && hlsOk) ||
       (prefs.format === 'webrtc' && rtcOk);
-    const format = ok ? prefs.format : rtcOk ? 'webrtc' : hlsOk ? 'hls' : 'webrtc';
+    // 尊重用户偏好；不可用则回退（H.264 推荐 HLS，勿强制 WebRTC 以免 HEVC 报 codec 不支持）
+    const format = ok
+      ? prefs.format
+      : hlsOk
+        ? 'hls'
+        : rtcOk
+          ? 'webrtc'
+          : 'hls';
     setStreamPrefs({ format });
   }, [cameraId, playback]);
 

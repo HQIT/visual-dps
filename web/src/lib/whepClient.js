@@ -169,9 +169,13 @@ export async function startWhep(whepUrl, videoEl, onIceFailed) {
     } catch {
       /* ignore */
     }
-    throw new Error(
-      detail || `WebRTC 信令失败 (HTTP ${resp.status})，请确认 MediaMTX 已开启 WebRTC（8889）且该路已有画面`,
-    );
+    const raw = detail || `WebRTC 信令失败 (HTTP ${resp.status})，请确认 MediaMTX 已开启 WebRTC（8889）且该路已有画面`;
+    if (/codec|not supported by client|H265|HEVC/i.test(raw)) {
+      throw new Error(
+        'WebRTC：浏览器不支持当前视频编码（多为 H.265）。请将海康码流改为 H.264 后重试，或在监控页切换到 HLS。',
+      );
+    }
+    throw new Error(raw);
   }
 
   const loc = resp.headers.get('location');

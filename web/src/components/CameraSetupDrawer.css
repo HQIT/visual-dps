@@ -245,6 +245,21 @@
   color: #7a92a8;
 }
 
+.drawer-field-hint--default {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.drawer-default-url {
+  font-size: 0.72rem;
+  word-break: break-all;
+  color: #b8d4e8;
+  background: rgba(0, 0, 0, 0.25);
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+
 .detail-row--switch {
   align-items: center;
 }

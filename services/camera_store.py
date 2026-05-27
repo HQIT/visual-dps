@@ -134,6 +134,27 @@ def save_cameras(camera_file: str, items: List[dict]):
         json.dump(items, f, ensure_ascii=False, indent=2)
 
 
+def default_playback_url_for_path(path: str) -> str:
+    return build_playback_url(path)
+
+
+def _resolve_playback_url(path: str, playback_url: str, fallback_url: str = "") -> tuple[str, str | None]:
+    """自定义本机播放地址；留空则按通道编号自动拼接。"""
+    custom = str(playback_url or "").strip()
+    if custom:
+        err = _validate_stream_url(custom)
+        if err:
+            return "", err
+        return custom, None
+    fb = str(fallback_url or "").strip()
+    if fb:
+        err = _validate_stream_url(fb)
+        if err:
+            return "", err
+        return fb, None
+    return build_playback_url(path), None
+
+
 def _coerce_rtsp_pull_urls(path: str, url: str, pull_url: str) -> tuple[str, str]:
     """主动拉流：UI 常把上游地址写在 url；拆成 pull_url + 本机播放 url。"""
     url = str(url or "").strip()
@@ -160,6 +181,7 @@ def validate_camera_payload(data: dict, existing_id: str | None = None) -> tuple
     name = str(data.get("name") or "").strip()
     url = str(data.get("url") or "").strip()
     pull_url = str(data.get("pull_url") or "").strip()
+    playback_url = str(data.get("playback_url") or "").strip()
     device = str(data.get("device") or "/dev/video0").strip()
 
     if not path:
@@ -170,28 +192,30 @@ def validate_camera_payload(data: dict, existing_id: str | None = None) -> tuple
         return None, "名称不能为空"
 
     if source_type == SOURCE_EXTERNAL:
-        if not url:
-            return None, "请填写完整的视频流地址"
-        url_err = _validate_stream_url(url)
+        url, url_err = _resolve_playback_url(path, playback_url, url)
         if url_err:
             return None, url_err
     elif source_type == SOURCE_RTSP_PULL:
-        url, pull_url = _coerce_rtsp_pull_urls(path, url, pull_url)
+        if not pull_url:
+            _, pull_url = _coerce_rtsp_pull_urls(path, url, pull_url)
         if not pull_url:
             return None, "请填写上游视频流地址"
-        url_err = _validate_stream_url(pull_url)
+        pull_err = _validate_stream_url(pull_url)
+        if pull_err:
+            return None, pull_err
+        url, url_err = _resolve_playback_url(path, playback_url, "")
         if url_err:
             return None, url_err
-        if not url:
-            url = build_playback_url(path)
     elif source_type == SOURCE_V4L2:
         if not device:
             return None, "请填写本地摄像头设备路径（如 /dev/video0）"
-        if not url:
-            url = build_playback_url(path)
+        url, url_err = _resolve_playback_url(path, playback_url, url)
+        if url_err:
+            return None, url_err
     elif source_type == SOURCE_PUBLISHER:
-        if not url:
-            url = build_playback_url(path)
+        url, url_err = _resolve_playback_url(path, playback_url, url)
+        if url_err:
+            return None, url_err
     else:
         return None, f"不支持的 source_type: {source_type}"
 

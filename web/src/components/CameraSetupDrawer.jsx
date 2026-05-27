@@ -19,6 +19,7 @@ export default function CameraSetupDrawer({
   camera,
   previewSrc = null,
   form,
+  playbackDefault = '',
   globalDefaults = {},
   effectiveSettings = {},
   onChange,
@@ -194,17 +195,38 @@ export default function CameraSetupDrawer({
                   placeholder={
                     isRtspPull
                       ? 'rtsp://user:pass@192.168.1.10:554/Streaming/Channels/101'
-                      : 'rtsp://127.0.0.1:8554/cam8'
+                      : playbackDefault || 'rtsp://127.0.0.1:8554/cam8'
                   }
-                  required
+                  required={isRtspPull}
                 />
               </label>
-              {isRtspPull ? (
+              {!isRtspPull ? (
                 <p className="drawer-field-hint">
-                  保存后本机播放地址为 rtsp://&lt;MediaMTX&gt;:8554/
-                  {form.path || '通道编号'}，并写入 mediamtx.yml 拉流配置。
+                  留空则使用默认本机播放地址（见下方）；填写时需为合法 RTSP/HTTP(S) URL。
                 </p>
-              ) : null}
+              ) : (
+                <p className="drawer-field-hint">
+                  保存后写入 mediamtx.yml 的 source 为该上游地址。
+                </p>
+              )}
+              <label>
+                本机播放 RTSP（url，可选）
+                <input
+                  value={form.playback_url || ''}
+                  onChange={(e) => onChange('playback_url', e.target.value)}
+                  placeholder={playbackDefault || '留空则自动拼接'}
+                />
+              </label>
+              <p className="drawer-field-hint drawer-field-hint--default">
+                默认自动拼接：
+                <code className="drawer-default-url">
+                  {playbackDefault ||
+                    (form.path
+                      ? '填写通道编号后显示'
+                      : '请先填写通道编号')}
+                </code>
+                {form.playback_url?.trim() ? '' : '（当前将使用此地址）'}
+              </p>
               {isCreate ? (
                 <div className="detail-row detail-row--switch drawer-form-enabled-row">
                   <span className="detail-label">启用该路摄像头</span>

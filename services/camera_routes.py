@@ -20,6 +20,7 @@ from services.camera_service import (
 from services.camera_store import (
     apply_mediamtx,
     create_camera,
+    default_playback_url_for_path,
     delete_camera,
     get_camera,
     load_camera_ips,
@@ -33,6 +34,8 @@ from services.inference_container_service import (
 )
 from services.mediamtx_proxy import proxy_hls, proxy_whep
 from services.mediamtx_service import (
+    MEDIAMTX_RTSP_HOST,
+    MEDIAMTX_RTSP_PORT,
     build_camera_playback_urls,
     generate_mediamtx_yaml,
     is_mediamtx_managed,
@@ -61,6 +64,24 @@ def register_camera_routes(
     last_frame_file: str = "",
     capture_height: int = 480,
 ):
+    @router.get("/cameras/playback-default")
+    async def camera_playback_default(path: str = ""):
+        slug = str(path or "").strip()
+        if not slug:
+            return {
+                "status": "success",
+                "playback_url": "",
+                "rtsp_host": MEDIAMTX_RTSP_HOST,
+                "rtsp_port": MEDIAMTX_RTSP_PORT,
+            }
+        return {
+            "status": "success",
+            "path": slug,
+            "playback_url": default_playback_url_for_path(slug),
+            "rtsp_host": MEDIAMTX_RTSP_HOST,
+            "rtsp_port": MEDIAMTX_RTSP_PORT,
+        }
+
     @router.get("/cameras")
     async def list_cameras(probe: bool = True):
         items = list_cameras_with_status(
@@ -102,6 +123,12 @@ def register_camera_routes(
         if found.get("error"):
             return found
         cam = dict(found["camera"])
+        path_slug = str(cam.get("path") or cam.get("id") or "").strip()
+        default_pb = default_playback_url_for_path(path_slug) if path_slug else ""
+        cam["default_playback_url"] = default_pb
+        cam["playback_url_custom"] = bool(
+            cam.get("url") and default_pb and str(cam.get("url")).strip() != default_pb
+        )
         url = str(cam.get("url") or "").strip()
         cid = stable_camera_id(cam)
         if url:

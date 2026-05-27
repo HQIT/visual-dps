@@ -30,13 +30,18 @@ const INFER_LABEL = {
   paused: '检测已暂停',
 };
 
-import { streamUrlFromCamera } from '../lib/cameraSource';
+import {
+  playbackUrlFieldFromCamera,
+  streamUrlFromCamera,
+  validateStreamUrl,
+} from '../lib/cameraSource';
 
 const emptyForm = () => ({
   path: '',
   name: '',
   source_type: 'external',
   stream_url: '',
+  playback_url: '',
   enabled: true,
   settings: {},
 });
@@ -59,6 +64,7 @@ export default function DashboardPage() {
   const [saving, setSaving] = useState(false);
   const [configHint, setConfigHint] = useState('');
   const [globalSettings, setGlobalSettings] = useState({});
+  const [playbackDefault, setPlaybackDefault] = useState('');
 
   const applyConfigHint = (data) => {
     if (data?.reload_hint || data?.mediamtx?.reload_hint) {
@@ -179,18 +185,40 @@ export default function DashboardPage() {
     }
   }, []);
 
+  const fetchPlaybackDefault = useCallback(async (path) => {
+    const slug = String(path || '').trim();
+    if (!slug) {
+      setPlaybackDefault('');
+      return '';
+    }
+    try {
+      const data = await apiGet(
+        `/api/cameras/playback-default?path=${encodeURIComponent(slug)}`,
+      );
+      const def = data?.playback_url || '';
+      setPlaybackDefault(def);
+      return def;
+    } catch {
+      setPlaybackDefault('');
+      return '';
+    }
+  }, []);
+
   const openSetup = async (cam) => {
     setDrawerMode('edit');
     setSetupCamera(cam);
+    setDrawerOpen(true);
+    const path = cam.path || cam.id;
+    const defEarly = await fetchPlaybackDefault(path);
     setForm({
-      path: cam.path || cam.id,
+      path,
       name: cam.name || '',
       source_type: cam.source_type || 'external',
       stream_url: streamUrlFromCamera(cam),
+      playback_url: playbackUrlFieldFromCamera(cam, defEarly),
       enabled: cam.enabled !== false,
       settings: { ...(cam.settings || {}) },
     });
-    setDrawerOpen(true);
     let settings = { ...(cam.settings || {}) };
     let fullCam = cam;
     try {
@@ -210,11 +238,15 @@ export default function DashboardPage() {
     } catch {
       await loadGlobalSettings();
     }
+    const def =
+      fullCam.default_playback_url ||
+      (await fetchPlaybackDefault(fullCam.path || fullCam.id));
     setForm({
       path: fullCam.path || fullCam.id,
       name: fullCam.name || '',
       source_type: fullCam.source_type || 'external',
       stream_url: streamUrlFromCamera(fullCam),
+      playback_url: playbackUrlFieldFromCamera(fullCam, def),
       enabled: fullCam.enabled !== false,
       settings,
     });
@@ -232,25 +264,67 @@ export default function DashboardPage() {
     };
     document.addEventListener('keydown', onKey);
     document.body.style.overflow = 'hidden';
+    if (form.path) {
+      void fetchPlaybackDefault(form.path);
+    }
     return () => {
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = '';
     };
-  }, [drawerOpen]);
+  }, [drawerOpen, fetchPlaybackDefault, form.path]);
+
+  useEffect(() => {
+    if (!drawerOpen || drawerMode !== 'create') return;
+    void fetchPlaybackDefault(form.path);
+  }, [drawerOpen, drawerMode, form.path, fetchPlaybackDefault]);
 
   const onFormChange = (field, value) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
+    setForm((prev) => {
+      const next = { ...prev, [field]: value };
+      if (field === 'path') {
+        void fetchPlaybackDefault(value);
+      }
+      return next;
+    });
   };
 
   const saveFromDrawer = async () => {
     const sourceType = form.source_type || 'external';
     const stream = form.stream_url.trim();
+    const customPlayback = form.playback_url.trim();
+
+    if (sourceType === 'rtsp_pull') {
+      if (!stream) {
+        alert('请填写上游 RTSP 地址');
+        return;
+      }
+      const pullErr = validateStreamUrl(stream);
+      if (pullErr) {
+        alert(pullErr);
+        return;
+      }
+    } else {
+      const mainErr = validateStreamUrl(stream);
+      if (stream && mainErr) {
+        alert(mainErr);
+        return;
+      }
+    }
+    if (customPlayback) {
+      const pbErr = validateStreamUrl(customPlayback);
+      if (pbErr) {
+        alert(pbErr);
+        return;
+      }
+    }
+
     const payload = {
       path: form.path,
       name: form.name,
       source_type: sourceType,
       enabled: form.enabled,
       settings: form.settings || {},
+      playback_url: customPlayback,
     };
     if (sourceType === 'rtsp_pull') {
       payload.pull_url = stream;
@@ -511,6 +585,7 @@ export default function DashboardPage() {
         camera={drawerCamera}
         previewSrc={drawerCamera ? previewById[drawerCamera.id] : null}
         form={form}
+        playbackDefault={playbackDefault}
         onChange={onFormChange}
         globalDefaults={globalSettings}
         effectiveSettings={drawerCamera?.effective_settings || {}}

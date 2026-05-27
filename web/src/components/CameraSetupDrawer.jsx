@@ -1,4 +1,5 @@
 import InferenceToggle from './InferenceToggle';
+import { CAMERA_SOURCE_OPTIONS } from '../lib/cameraSource';
 import { CAMERA_OVERRIDE_FIELDS, formatSettingDisplayValue } from '../lib/cameraSettings';
 import { formatDuration, thumbnailUrl } from '../api/client';
 import './CameraSetupDrawer.css';
@@ -32,6 +33,7 @@ export default function CameraSetupDrawer({
   if (!open) return null;
 
   const isCreate = mode === 'create';
+  const isRtspPull = form.source_type === 'rtsp_pull';
   const infer = camera?.inference;
   const inferStatus = infer?.status || 'stopped';
   const settings = form.settings || {};
@@ -172,14 +174,37 @@ export default function CameraSetupDrawer({
                 />
               </label>
               <label>
-                RTSP 地址
+                接入方式
+                <select
+                  value={form.source_type || 'external'}
+                  onChange={(e) => onChange('source_type', e.target.value)}
+                >
+                  {CAMERA_SOURCE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                {isRtspPull ? '上游 RTSP 地址（pull_url）' : 'RTSP 播放地址（url）'}
                 <input
-                  value={form.url}
-                  onChange={(e) => onChange('url', e.target.value)}
-                  placeholder="rtsp://127.0.0.1:8554/cam8"
+                  value={form.stream_url || ''}
+                  onChange={(e) => onChange('stream_url', e.target.value)}
+                  placeholder={
+                    isRtspPull
+                      ? 'rtsp://user:pass@192.168.1.10:554/Streaming/Channels/101'
+                      : 'rtsp://127.0.0.1:8554/cam8'
+                  }
                   required
                 />
               </label>
+              {isRtspPull ? (
+                <p className="drawer-field-hint">
+                  保存后本机播放地址为 rtsp://&lt;MediaMTX&gt;:8554/
+                  {form.path || '通道编号'}，并写入 mediamtx.yml 拉流配置。
+                </p>
+              ) : null}
               {isCreate ? (
                 <div className="detail-row detail-row--switch drawer-form-enabled-row">
                   <span className="detail-label">启用该路摄像头</span>

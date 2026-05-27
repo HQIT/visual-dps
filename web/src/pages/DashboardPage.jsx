@@ -30,17 +30,13 @@ const INFER_LABEL = {
   paused: '检测已暂停',
 };
 
-function rtspUrlFromCamera(cam) {
-  if (cam.source_type === 'rtsp_pull' && cam.pull_url) {
-    return cam.pull_url;
-  }
-  return cam.url || '';
-}
+import { streamUrlFromCamera } from '../lib/cameraSource';
 
 const emptyForm = () => ({
   path: '',
   name: '',
-  url: '',
+  source_type: 'external',
+  stream_url: '',
   enabled: true,
   settings: {},
 });
@@ -189,7 +185,8 @@ export default function DashboardPage() {
     setForm({
       path: cam.path || cam.id,
       name: cam.name || '',
-      url: rtspUrlFromCamera(cam),
+      source_type: cam.source_type || 'external',
+      stream_url: streamUrlFromCamera(cam),
       enabled: cam.enabled !== false,
       settings: { ...(cam.settings || {}) },
     });
@@ -216,7 +213,8 @@ export default function DashboardPage() {
     setForm({
       path: fullCam.path || fullCam.id,
       name: fullCam.name || '',
-      url: rtspUrlFromCamera(fullCam),
+      source_type: fullCam.source_type || 'external',
+      stream_url: streamUrlFromCamera(fullCam),
       enabled: fullCam.enabled !== false,
       settings,
     });
@@ -245,14 +243,22 @@ export default function DashboardPage() {
   };
 
   const saveFromDrawer = async () => {
+    const sourceType = form.source_type || 'external';
+    const stream = form.stream_url.trim();
     const payload = {
       path: form.path,
       name: form.name,
-      url: form.url.trim(),
-      source_type: setupCamera?.source_type || 'external',
+      source_type: sourceType,
       enabled: form.enabled,
       settings: form.settings || {},
     };
+    if (sourceType === 'rtsp_pull') {
+      payload.pull_url = stream;
+      payload.url = '';
+    } else {
+      payload.url = stream;
+      payload.pull_url = '';
+    }
     setSaving(true);
     try {
       const data =

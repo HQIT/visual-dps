@@ -14,6 +14,7 @@ from services.mediamtx_service import (
     SOURCE_V4L2,
     build_playback_url,
     encode_rtsp_url_credentials,
+    is_local_mediamtx_rtsp_url,
     path_from_url,
     sync_mediamtx_config,
 )
@@ -133,6 +134,23 @@ def save_cameras(camera_file: str, items: List[dict]):
         json.dump(items, f, ensure_ascii=False, indent=2)
 
 
+def _coerce_rtsp_pull_urls(path: str, url: str, pull_url: str) -> tuple[str, str]:
+    """主动拉流：UI 常把上游地址写在 url；拆成 pull_url + 本机播放 url。"""
+    url = str(url or "").strip()
+    pull_url = str(pull_url or "").strip()
+    playback = build_playback_url(path)
+
+    if pull_url and not is_local_mediamtx_rtsp_url(pull_url, path):
+        if not url or is_local_mediamtx_rtsp_url(url, path):
+            url = playback
+        return url, pull_url
+
+    if url and not is_local_mediamtx_rtsp_url(url, path):
+        return playback, url
+
+    return url, pull_url
+
+
 def validate_camera_payload(data: dict, existing_id: str | None = None) -> tuple[dict | None, str | None]:
     path = str(data.get("path") or data.get("id") or "").strip()
     if existing_id:
@@ -158,8 +176,12 @@ def validate_camera_payload(data: dict, existing_id: str | None = None) -> tuple
         if url_err:
             return None, url_err
     elif source_type == SOURCE_RTSP_PULL:
+        url, pull_url = _coerce_rtsp_pull_urls(path, url, pull_url)
         if not pull_url:
             return None, "请填写上游视频流地址"
+        url_err = _validate_stream_url(pull_url)
+        if url_err:
+            return None, url_err
         if not url:
             url = build_playback_url(path)
     elif source_type == SOURCE_V4L2:

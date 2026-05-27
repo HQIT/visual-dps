@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 from typing import List
@@ -23,6 +24,23 @@ SOURCE_PUBLISHER = "publisher"
 SOURCE_EXTERNAL = "external"
 
 MANAGED_SOURCE_TYPES = {SOURCE_V4L2, SOURCE_RTSP_PULL, SOURCE_PUBLISHER}
+
+
+def yaml_path_key(path: str) -> str:
+    """MediaMTX paths 下的 YAML 键；纯数字等须加引号，否则会被解析成整数而非字符串。"""
+    slug = str(path or "").strip()
+    if not slug:
+        return '""'
+    if slug.isdigit() or (slug and slug[0].isdigit()):
+        escaped = slug.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+    if slug.lower() in ("true", "false", "yes", "no", "on", "off", "null", "~"):
+        escaped = slug.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+    if re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_-]*", slug):
+        return slug
+    escaped = slug.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
 
 
 def encode_rtsp_url_credentials(url: str) -> str:
@@ -93,6 +111,32 @@ def is_mediamtx_managed(camera: dict) -> bool:
     return camera.get("source_type") in MANAGED_SOURCE_TYPES and camera.get("enabled", True)
 
 
+def _local_mediamtx_hosts() -> set[str]:
+    return {
+        MEDIAMTX_RTSP_HOST.lower(),
+        MEDIAMTX_PUBLIC_HOST.lower(),
+        MEDIAMTX_INTERNAL_HOST.lower(),
+        "127.0.0.1",
+        "localhost",
+        "mediamtx",
+    }
+
+
+def is_local_mediamtx_rtsp_url(url: str, path: str = "") -> bool:
+    """是否为指向本机 MediaMTX 的 RTSP 播放地址（可选校验 path 一致）。"""
+    parsed = urlparse(str(url or "").strip())
+    if parsed.scheme.lower() != "rtsp":
+        return False
+    host = (parsed.hostname or "").lower()
+    port = parsed.port if parsed.port is not None else MEDIAMTX_RTSP_PORT
+    if host not in _local_mediamtx_hosts() or port != MEDIAMTX_RTSP_PORT:
+        return False
+    slug = str(path or "").strip()
+    if slug:
+        return path_from_url(url) == slug
+    return True
+
+
 def is_mediamtx_playback_available(camera: dict) -> bool:
     """是否可走 MediaMTX 的 HLS/WebRTC（含 external 但 RTSP 指向本机 MediaMTX 路径）。"""
     if not camera.get("enabled", True):
@@ -103,22 +147,7 @@ def is_mediamtx_playback_available(camera: dict) -> bool:
     url = str(camera.get("url") or "").strip()
     if not path or not url:
         return False
-    parsed = urlparse(url)
-    if parsed.scheme.lower() != "rtsp":
-        return False
-    host = (parsed.hostname or "").lower()
-    port = parsed.port if parsed.port is not None else MEDIAMTX_RTSP_PORT
-    local_hosts = {
-        MEDIAMTX_RTSP_HOST.lower(),
-        MEDIAMTX_PUBLIC_HOST.lower(),
-        MEDIAMTX_INTERNAL_HOST.lower(),
-        "127.0.0.1",
-        "localhost",
-        "mediamtx",
-    }
-    if host not in local_hosts or port != MEDIAMTX_RTSP_PORT:
-        return False
-    return path_from_url(url) == path
+    return is_local_mediamtx_rtsp_url(url, path)
 
 
 def path_from_url(url: str) -> str:
@@ -245,7 +274,7 @@ def generate_mediamtx_yaml(cameras: List[dict]) -> str:
         if not path:
             continue
         source_type = cam.get("source_type")
-        lines.append(f"  {path}:")
+        lines.append(f"  {yaml_path_key(path)}:")
 
         if source_type == SOURCE_EXTERNAL:
             lines.append("    source: publisher")
@@ -367,6 +396,23 @@ def reload_mediamtx_runtime(cameras: List[dict]) -> dict:
         return {"reloaded": False, "skipped": True, "reason": str(exc)}
 
 
+def _mediamtx_config_has_unquoted_numeric_paths(text: str) -> bool:
+    """检测 paths 下未加引号的纯数字键（YAML 会解析为 int，导致 MediaMTX path 异常）。"""
+    in_paths = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped == "paths:":
+            in_paths = True
+            continue
+        if in_paths and line and not line.startswith(" "):
+            in_paths = False
+        if not in_paths:
+            continue
+        if re.match(r"^\d+:$", stripped):
+            return True
+    return False
+
+
 def _mediamtx_config_needs_rewrite(config_path: str) -> bool:
     """旧版 apiAddress 绑定 127.0.0.1 时，compose 内其它容器无法访问 API。"""
     if not os.path.isfile(config_path):
@@ -375,6 +421,8 @@ def _mediamtx_config_needs_rewrite(config_path: str) -> bool:
         with open(config_path, encoding="utf-8") as f:
             text = f.read()
     except OSError:
+        return True
+    if _mediamtx_config_has_unquoted_numeric_paths(text):
         return True
     for line in text.splitlines():
         s = line.strip()

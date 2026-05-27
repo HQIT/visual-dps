@@ -25,6 +25,8 @@ from services.camera_store import (
     get_camera,
     load_camera_ips,
     load_cameras,
+    start_all_inference,
+    stop_all_inference,
     update_camera,
 )
 from services.inference_container_service import (
@@ -251,6 +253,18 @@ def register_camera_routes(
                 "X-Accel-Buffering": "no",
             },
         )
+
+    @router.post("/cameras/inference/start-all")
+    async def start_all_camera_inference(request: Request):
+        result = start_all_inference(camera_ips_file, request=request)
+        audit_from_result(request, "inference.start_all", "system", "", result)
+        return _attach_list_items(result, probe=False)
+
+    @router.post("/cameras/inference/stop-all")
+    async def stop_all_camera_inference(request: Request):
+        result = stop_all_inference(camera_ips_file, request=request)
+        audit_from_result(request, "inference.stop_all", "system", "", result)
+        return _attach_list_items(result, probe=False)
 
     @router.post("/cameras/{camera_id}/inference/start")
     async def start_camera_inference(camera_id: str, request: Request):

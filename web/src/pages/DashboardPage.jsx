@@ -30,6 +30,30 @@ const INFER_LABEL = {
   paused: '检测已暂停',
 };
 
+function formatBulkInferSummary(summary, mode) {
+  if (!summary) return '';
+  if (mode === 'start') {
+    const parts = [];
+    if (summary.started > 0) parts.push(`已启动 ${summary.started} 路`);
+    if (summary.skipped > 0) parts.push(`跳过 ${summary.skipped} 路`);
+    if (summary.failed > 0) parts.push(`失败 ${summary.failed} 路`);
+    return parts.join(' · ') || '没有可启动的通道';
+  }
+  const parts = [];
+  if (summary.stopped > 0) parts.push(`已停止 ${summary.stopped} 路`);
+  if (summary.failed > 0) parts.push(`失败 ${summary.failed} 路`);
+  return parts.join(' · ') || '没有需要停止的通道';
+}
+
+function formatBulkCaptureSummary(summary) {
+  if (!summary) return '';
+  const parts = [];
+  if (summary.captured > 0) parts.push(`已抓帧 ${summary.captured} 路`);
+  if (summary.skipped > 0) parts.push(`跳过 ${summary.skipped} 路`);
+  if (summary.failed > 0) parts.push(`失败 ${summary.failed} 路`);
+  return parts.join(' · ') || '没有可抓帧的通道';
+}
+
 import {
   playbackUrlFieldFromCamera,
   streamUrlFromCamera,
@@ -55,6 +79,9 @@ export default function DashboardPage() {
   const [msgErr, setMsgErr] = useState(false);
   const [refreshingId, setRefreshingId] = useState(null);
   const [inferLoadingId, setInferLoadingId] = useState(null);
+  /** 'start' | 'stop'：一键批量启停推理 */
+  const [bulkInferAction, setBulkInferAction] = useState(null);
+  const [bulkCapturing, setBulkCapturing] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerMode, setDrawerMode] = useState('edit');
   const [setupCamera, setSetupCamera] = useState(null);
@@ -410,39 +437,110 @@ export default function DashboardPage() {
     }
   };
 
+  const startAllInference = async () => {
+    if (!cameras.length || bulkInferAction || bulkCapturing) return;
+    setBulkInferAction('start');
+    try {
+      const data = await apiPost('/api/cameras/inference/start-all', {});
+      const hint = formatBulkInferSummary(data.summary, 'start');
+      if (data.error) {
+        alert(hint ? `${formatUserError(data.error)}\n${hint}` : formatUserError(data.error));
+        setMsg(hint || formatUserError(data.error));
+        setMsgErr(true);
+      } else if (hint) {
+        setMsg(hint);
+        setMsgErr(Boolean(data.summary?.failed));
+      }
+      await refreshCamerasAfterMutation(data);
+    } catch (e) {
+      alert(formatUserError(e.message) || '批量启动检测失败');
+    } finally {
+      setBulkInferAction(null);
+    }
+  };
+
+  const stopAllInference = async () => {
+    if (!cameras.length || bulkInferAction || bulkCapturing) return;
+    setBulkInferAction('stop');
+    try {
+      const data = await apiPost('/api/cameras/inference/stop-all', {});
+      const hint = formatBulkInferSummary(data.summary, 'stop');
+      if (data.error) {
+        alert(hint ? `${formatUserError(data.error)}\n${hint}` : formatUserError(data.error));
+        setMsg(hint || formatUserError(data.error));
+        setMsgErr(true);
+      } else if (hint) {
+        setMsg(hint);
+        setMsgErr(Boolean(data.summary?.failed));
+      }
+      await refreshCamerasAfterMutation(data);
+    } catch (e) {
+      alert(formatUserError(e.message) || '批量停止检测失败');
+    } finally {
+      setBulkInferAction(null);
+    }
+  };
+
   const openMonitor = (cam) => {
     navigate(`/monitor?camera=${encodeURIComponent(cam.id)}`);
+  };
+
+  const applyCaptureResult = useCallback((cam, data) => {
+    if (data.image) {
+      setPreviewById((prev) => ({
+        ...prev,
+        [cam.id]: `data:image/jpeg;base64,${data.image}`,
+      }));
+    }
+    const patch = {
+      has_thumbnail: true,
+      last_frame_at: data.last_frame_at ?? Date.now() / 1000,
+      online: data.online ?? cam.online,
+      activity_seconds: data.activity_seconds ?? cam.activity_seconds,
+    };
+    setCameras((prev) => prev.map((c) => (c.id === cam.id ? { ...c, ...patch } : c)));
+    setSetupCamera((prev) => (prev?.id === cam.id ? { ...prev, ...patch } : prev));
+  }, []);
+
+  const captureFrameCore = async (cam) => {
+    if (cam.enabled === false) {
+      return { status: 'skipped', reason: 'disabled' };
+    }
+    const pb = await apiGet(cameraPlaybackUrl(cam.id));
+    const hlsUrl = pb?.formats?.hls?.url;
+    if (!pb || pb.status !== 'success' || !hlsUrl || !pb.formats?.hls?.available) {
+      return {
+        status: 'skipped',
+        reason: 'no_hls',
+        message: formatUserError(pb?.error) || 'HLS 预览不可用',
+      };
+    }
+    const image = await captureThumbnailFromHls(hlsUrl);
+    const data = await apiPost(`/api/cameras/${encodeURIComponent(cam.id)}/capture`, { image });
+    if (data.status !== 'success') {
+      return {
+        status: 'failed',
+        message: formatUserError(data.error) || '抓帧失败',
+      };
+    }
+    return { status: 'captured', data };
   };
 
   const captureFrame = async (cam) => {
     setRefreshingId(cam.id);
     try {
-      const pb = await apiGet(cameraPlaybackUrl(cam.id));
-      const hlsUrl = pb?.formats?.hls?.url;
-      if (!pb || pb.status !== 'success' || !hlsUrl || !pb.formats?.hls?.available) {
-        alert(formatUserError(pb?.error) || '无法抓帧：HLS 预览不可用');
+      const result = await captureFrameCore(cam);
+      if (result.status === 'skipped') {
+        if (result.reason === 'no_hls') {
+          alert(result.message || '无法抓帧：HLS 预览不可用');
+        }
         return;
       }
-      const image = await captureThumbnailFromHls(hlsUrl);
-      const data = await apiPost(`/api/cameras/${encodeURIComponent(cam.id)}/capture`, { image });
-      if (data.status !== 'success') {
-        alert(formatUserError(data.error) || '抓帧失败');
+      if (result.status === 'failed') {
+        alert(result.message || '抓帧失败');
         return;
       }
-      if (data.image) {
-        setPreviewById((prev) => ({
-          ...prev,
-          [cam.id]: `data:image/jpeg;base64,${data.image}`,
-        }));
-      }
-      const patch = {
-        has_thumbnail: true,
-        last_frame_at: data.last_frame_at ?? Date.now() / 1000,
-        online: data.online ?? cam.online,
-        activity_seconds: data.activity_seconds ?? cam.activity_seconds,
-      };
-      setCameras((prev) => prev.map((c) => (c.id === cam.id ? { ...c, ...patch } : c)));
-      setSetupCamera((prev) => (prev?.id === cam.id ? { ...prev, ...patch } : prev));
+      applyCaptureResult(cam, result.data);
     } catch (e) {
       alert(formatUserError(e.message) || '抓帧失败');
     } finally {
@@ -450,7 +548,50 @@ export default function DashboardPage() {
     }
   };
 
-  const drawerActionLoading = inferLoadingId === setupCamera?.id || refreshingId === setupCamera?.id;
+  const inferBusy = Boolean(bulkInferAction || inferLoadingId || bulkCapturing);
+  const captureBusy = Boolean(bulkCapturing || refreshingId || bulkInferAction);
+
+  const captureAllFrames = async () => {
+    if (!cameras.length || captureBusy) return;
+    setBulkCapturing(true);
+    let captured = 0;
+    let skipped = 0;
+    let failed = 0;
+    try {
+      for (const cam of cameras) {
+        try {
+          const result = await captureFrameCore(cam);
+          if (result.status === 'skipped') {
+            skipped += 1;
+            continue;
+          }
+          if (result.status === 'failed') {
+            failed += 1;
+            continue;
+          }
+          applyCaptureResult(cam, result.data);
+          captured += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+      const hint = formatBulkCaptureSummary({ captured, skipped, failed });
+      setMsg(hint);
+      setMsgErr(failed > 0 && captured === 0);
+      if (failed > 0 && captured === 0) {
+        alert(hint || '全部抓帧失败');
+      }
+    } catch (e) {
+      alert(formatUserError(e.message) || '批量抓帧失败');
+    } finally {
+      setBulkCapturing(false);
+    }
+  };
+
+  const drawerActionLoading =
+    inferLoadingId === setupCamera?.id ||
+    refreshingId === setupCamera?.id ||
+    bulkCapturing;
   const drawerCamera = setupCamera
     ? cameras.find((c) => c.id === setupCamera.id) || setupCamera
     : null;
@@ -465,6 +606,33 @@ export default function DashboardPage() {
             {probing && !listLoading ? ' · 正在探测在线状态' : ''}
           </span>
           <div className="toolbar-actions">
+            <button
+              type="button"
+              className="btn-toolbar"
+              title="为所有已启用且已配置视频流地址的摄像头启动智能检测"
+              disabled={listLoading || probing || !cameras.length || inferBusy}
+              onClick={startAllInference}
+            >
+              {bulkInferAction === 'start' ? '启动中…' : '全部开启检测'}
+            </button>
+            <button
+              type="button"
+              className="btn-toolbar secondary"
+              title="停止所有摄像头的智能检测"
+              disabled={listLoading || probing || !cameras.length || inferBusy}
+              onClick={stopAllInference}
+            >
+              {bulkInferAction === 'stop' ? '停止中…' : '全部关闭检测'}
+            </button>
+            <button
+              type="button"
+              className="btn-toolbar secondary"
+              title="为所有已启用且 HLS 预览可用的摄像头抓取缩略图"
+              disabled={listLoading || probing || !cameras.length || captureBusy}
+              onClick={captureAllFrames}
+            >
+              {bulkCapturing ? '抓帧中…' : '全部抓帧'}
+            </button>
             <button
               type="button"
               className="btn-icon btn-icon-primary"
@@ -523,8 +691,8 @@ export default function DashboardPage() {
                         cam.inference?.status === 'running' ||
                         cam.inference?.status === 'starting'
                       }
-                      loading={inferLoadingId === cam.id}
-                      disabled={inferLoadingId === cam.id}
+                      loading={inferLoadingId === cam.id || Boolean(bulkInferAction)}
+                      disabled={inferBusy}
                       title={
                         cam.inference?.status === 'running' || cam.inference?.status === 'starting'
                           ? '关闭智能检测'
@@ -536,7 +704,7 @@ export default function DashboardPage() {
                       type="button"
                       className="btn-icon"
                       title="抓帧"
-                      disabled={refreshingId === cam.id}
+                      disabled={captureBusy}
                       onClick={(e) => {
                         e.stopPropagation();
                         captureFrame(cam);

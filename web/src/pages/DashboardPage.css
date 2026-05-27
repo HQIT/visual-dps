@@ -16,7 +16,41 @@
 .dashboard-page .toolbar-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
+}
+
+.dashboard-page .toolbar-actions .btn-toolbar {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 6px;
+  border: 1px solid #00b894;
+  background: #00d4aa;
+  color: #072018;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.dashboard-page .toolbar-actions .btn-toolbar:hover:not(:disabled) {
+  background: #2eecc0;
+}
+
+.dashboard-page .toolbar-actions .btn-toolbar.secondary {
+  background: #1e2d38;
+  border-color: #3a4f5f;
+  color: #e8f0f6;
+  font-weight: 500;
+}
+
+.dashboard-page .toolbar-actions .btn-toolbar.secondary:hover:not(:disabled) {
+  background: #263a48;
+}
+
+.dashboard-page .toolbar-actions .btn-toolbar:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .dashboard-page .toolbar-actions .btn-icon {

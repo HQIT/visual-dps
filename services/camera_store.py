@@ -302,6 +302,62 @@ def apply_mediamtx(camera_file: str, mediamtx_config_path: str) -> dict:
     return {"status": "success", "mediamtx": mtx, "items": items}
 
 
+def start_all_inference(camera_file: str, request=None) -> dict:
+    """为所有已启用且配置了视频流地址的摄像头启动推理容器。"""
+    from services.inference_container_service import start_inference_container
+
+    items = load_cameras(camera_file)
+    results: List[dict] = []
+    started = skipped = failed = 0
+    for cam in items:
+        cid = str(cam.get("id") or cam.get("path") or "").strip()
+        if not cam.get("enabled", True):
+            results.append({"id": cid, "status": "skipped", "reason": "disabled"})
+            skipped += 1
+            continue
+        if not str(cam.get("url") or "").strip():
+            results.append({"id": cid, "status": "skipped", "reason": "no_stream_url"})
+            skipped += 1
+            continue
+        r = start_inference_container(cam, request=request)
+        if r.get("error"):
+            results.append({"id": cid, "status": "error", "error": r["error"]})
+            failed += 1
+        else:
+            results.append({"id": cid, "status": "success", "inference": r.get("inference")})
+            started += 1
+    summary = {"started": started, "skipped": skipped, "failed": failed, "total": len(items)}
+    out: dict = {"status": "success", "summary": summary, "results": results}
+    if failed and not started:
+        out["error"] = "全部启动失败"
+    return out
+
+
+def stop_all_inference(camera_file: str, request=None) -> dict:
+    """停止所有摄像头的推理容器（未运行的通道会跳过）。"""
+    from services.inference_container_service import stop_inference_container
+
+    items = load_cameras(camera_file)
+    results: List[dict] = []
+    stopped = failed = 0
+    for cam in items:
+        cid = str(cam.get("id") or cam.get("path") or "").strip()
+        if not cid:
+            continue
+        r = stop_inference_container(cid, request=request)
+        if r.get("error"):
+            results.append({"id": cid, "status": "error", "error": r["error"]})
+            failed += 1
+        else:
+            results.append({"id": cid, "status": "success", "inference": r.get("inference")})
+            stopped += 1
+    summary = {"stopped": stopped, "failed": failed, "total": len(items)}
+    out: dict = {"status": "success", "summary": summary, "results": results}
+    if failed and not stopped:
+        out["error"] = "全部停止失败"
+    return out
+
+
 # 兼容旧 API：仅 name + url
 def load_camera_ips(camera_ips_file: str) -> List[dict]:
     return [{"name": c["name"], "url": c["url"]} for c in load_cameras(camera_ips_file)]

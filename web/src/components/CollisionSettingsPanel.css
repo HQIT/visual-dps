@@ -1,0 +1,161 @@
+.collision-settings-panel {
+  max-width: none;
+}
+
+.collision-settings-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(300px, 420px);
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 960px) {
+  .collision-settings-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.collision-settings-diagrams {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.collision-diagram {
+  background: #121a22;
+  border: 1px solid #2b3a45;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.collision-diagram-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.collision-diagram-head strong {
+  color: #c7d6e2;
+  font-size: 0.88rem;
+}
+
+.collision-diagram-head span {
+  color: #8b9bab;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.collision-diagram-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 6px;
+}
+
+.collision-diagram-label {
+  fill: #9ab1c4;
+  font-size: 11px;
+}
+
+.collision-diagram-legend {
+  fill: #7a8f9f;
+  font-size: 10px;
+}
+
+.collision-gating-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.collision-gating-cell {
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  border: 1px solid #3a4f5f;
+  background: #141c22;
+  color: #8fa3b5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+}
+
+.collision-gating-cell.hit {
+  background: rgba(255, 140, 50, 0.35);
+  border-color: #ffb347;
+  color: #ffd9a8;
+}
+
+.collision-gating-note {
+  font-size: 0.78rem;
+  color: #8b9bab;
+}
+
+.collision-gating-note .ok {
+  color: #5dffa8;
+}
+
+.collision-settings-sliders {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.collision-slider-group-title {
+  margin: 8px 0 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #9ab1c4;
+}
+
+.collision-slider-group-title:first-child {
+  margin-top: 0;
+}
+
+.collision-slider-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.collision-slider-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.collision-slider-value {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: #5dffa8;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.collision-slider-field .settings-field-label {
+  width: 100%;
+}
+
+.collision-slider {
+  width: 100%;
+  height: 6px;
+  accent-color: #2a6b4a;
+  cursor: pointer;
+}
+
+.collision-slider-range {
+  font-size: 0.72rem;
+  color: #6a8094;
+}
+
+.collision-toggle-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid #2b3a45;
+}

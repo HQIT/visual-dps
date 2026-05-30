@@ -35,7 +35,20 @@
         "preview_max_width": 640,
         "preview_jpeg_quality": 60,
         "alarm_min_consecutive_frames": 3,
-        "alarm_cooldown_frames": 6
+        "alarm_cooldown_frames": 6,
+        "collision": {
+            "min_consecutive_frames": 3,
+            "cooldown_frames": 6,
+            "window_frames": 6,
+            "wrist_conf": 0.45,
+            "elbow_conf": 0.4,
+            "forearm_extend_ratio": 0.2,
+            "boundary_margin_ratio": 0.04,
+            "boundary_margin_min_px": 3.0,
+            "track_max_match_dist": 220.0,
+            "track_stale_sec": 1.2,
+            "per_track_gating": true
+        }
     },
     "debug-info": {
         "enabled": false,

@@ -15,6 +15,19 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib import error, request
 
+import redis as sync_redis
+
+_callback_redis_pool: sync_redis.ConnectionPool | None = None
+
+
+def _callback_redis_client() -> sync_redis.Redis:
+    global _callback_redis_pool
+    if _callback_redis_pool is None:
+        from services.live_bus import redis_url
+
+        _callback_redis_pool = sync_redis.ConnectionPool.from_url(redis_url(), decode_responses=True)
+    return sync_redis.Redis(connection_pool=_callback_redis_pool)
+
 
 @dataclass
 class ReportRecord:
@@ -127,32 +140,30 @@ class CollisionCallbackReporter:
         if rec is None:
             return
         try:
-            from services.live_bus import redis_url
-
-            import redis as sync_redis
-
-            client = sync_redis.from_url(redis_url(), decode_responses=True)
+            client = _callback_redis_client()
             client.setex(
                 f"callback:record:{event_id}",
                 86400,
                 json.dumps(self._record_to_dict(rec), ensure_ascii=False),
             )
-            client.close()
         except Exception:
             pass
+
+    def _schedule_persist_record(self, event_id: str) -> None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._persist_record_redis(event_id)
+            return
+        loop.create_task(asyncio.to_thread(self._persist_record_redis, event_id))
 
     def get_record(self, event_id: str) -> dict[str, Any] | None:
         rec = self._records.get(event_id)
         if rec is not None:
             return self._record_to_dict(rec)
         try:
-            from services.live_bus import redis_url
-
-            import redis as sync_redis
-
-            client = sync_redis.from_url(redis_url(), decode_responses=True)
+            client = _callback_redis_client()
             raw = client.get(f"callback:record:{event_id}")
-            client.close()
             if raw:
                 data = json.loads(raw)
                 return data if isinstance(data, dict) else None
@@ -237,7 +248,7 @@ class CollisionCallbackReporter:
                 summary="回调已入队",
                 detail={"event_id": event_id, "box_id": box_id_text},
             )
-            self._persist_record_redis(event_id)
+            self._schedule_persist_record(event_id)
             return event_id
         except asyncio.QueueFull:
             record.status = "DROPPED"
@@ -328,7 +339,7 @@ class CollisionCallbackReporter:
                 f"[CALLBACK][ACK] event_id={event_id} status={http_status} "
                 f"response={json.dumps(response_body, ensure_ascii=False)}"
             )
-            self._persist_record_redis(event_id)
+            self._schedule_persist_record(event_id)
             return
 
         rec.http_status = http_status
@@ -357,7 +368,7 @@ class CollisionCallbackReporter:
                 f"[CALLBACK][FAILED] event_id={event_id} status={rec.http_status} "
                 f"error={rec.error} response={json.dumps(rec.response_body, ensure_ascii=False)}"
             )
-        self._persist_record_redis(event_id)
+        self._schedule_persist_record(event_id)
 
     def _post_json(self, payload: dict[str, Any]) -> tuple[bool, int | None, Any, str | None]:
         body = json.dumps(payload).encode("utf-8")

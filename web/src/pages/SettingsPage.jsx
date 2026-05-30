@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { apiDelete, apiGet, apiPatch, apiPost } from '../api/client';
 import LogsPanel from '../components/LogsPanel';
+import CollisionSettingsPanel from '../components/CollisionSettingsPanel';
 import ConfirmDialog from '../components/ConfirmDialog';
 import UserDrawer from '../components/UserDrawer';
 import FieldHint from '../components/FieldHint';
@@ -218,6 +219,52 @@ export default function SettingsPage() {
     }
   };
 
+  const renderSettingField = (field) => (
+    <label key={field.key}>
+      <span className="settings-field-label">
+        {field.label}
+        {field.hint ? <FieldHint text={field.hint} /> : null}
+      </span>
+      {field.type === 'boolean' ? (
+        <span className="settings-toggle-field">
+          <span className="settings-toggle">
+            <input
+              type="checkbox"
+              checked={Boolean(settings[field.key])}
+              onChange={(e) => setSettings((s) => ({ ...s, [field.key]: e.target.checked }))}
+            />
+            <span className="settings-toggle-track" aria-hidden="true" />
+          </span>
+        </span>
+      ) : field.type === 'select' ? (
+        <select
+          value={settings[field.key] ?? field.options[0]?.value ?? ''}
+          onChange={(e) => setSettings((s) => ({ ...s, [field.key]: e.target.value }))}
+        >
+          {field.options.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.shortLabel || opt.label}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <input
+          type="number"
+          min={field.min}
+          max={field.max}
+          step={field.step ?? 1}
+          value={settings[field.key] ?? ''}
+          onChange={(e) =>
+            setSettings((s) => ({
+              ...s,
+              [field.key]: field.step != null ? Number(e.target.value) : Number(e.target.value),
+            }))
+          }
+        />
+      )}
+    </label>
+  );
+
   return (
     <div className="page settings-page">
         <h1 className="page-title">系统设置</h1>
@@ -226,6 +273,11 @@ export default function SettingsPage() {
           {isAdmin && (
             <button type="button" className={tab === 'system' ? 'active' : ''} onClick={() => setTab('system')}>
               全局配置
+            </button>
+          )}
+          {isAdmin && (
+            <button type="button" className={tab === 'collision' ? 'active' : ''} onClick={() => setTab('collision')}>
+              碰撞检测
             </button>
           )}
           <button type="button" className={tab === 'password' ? 'active' : ''} onClick={() => setTab('password')}>
@@ -272,56 +324,10 @@ export default function SettingsPage() {
           <form className="settings-panel" onSubmit={saveSettings}>
             <p className="settings-panel-lead">
               以下为<strong>全局默认值</strong>。未单独配置的摄像头将自动使用；在摄像头设置中可勾选「自定义」覆盖。
+              碰撞检测参数请前往<strong>「碰撞检测」</strong>页配置。
             </p>
             <div className="settings-form-fields">
-              {CAMERA_OVERRIDE_FIELDS.map((field) => (
-                <label key={field.key}>
-                  <span className="settings-field-label">
-                    {field.label}
-                    {field.hint ? <FieldHint text={field.hint} /> : null}
-                  </span>
-                  {field.type === 'boolean' ? (
-                    <span className="settings-toggle-field">
-                      <span className="settings-toggle">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(settings[field.key])}
-                          onChange={(e) =>
-                            setSettings((s) => ({ ...s, [field.key]: e.target.checked }))
-                          }
-                        />
-                        <span className="settings-toggle-track" aria-hidden="true" />
-                      </span>
-                    </span>
-                  ) : field.type === 'select' ? (
-                    <select
-                      value={settings[field.key] ?? field.options[0]?.value ?? ''}
-                      onChange={(e) =>
-                        setSettings((s) => ({ ...s, [field.key]: e.target.value }))
-                      }
-                    >
-                      {field.options.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.shortLabel || opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input
-                      type="number"
-                      min={field.min}
-                      max={field.max}
-                      value={settings[field.key] ?? ''}
-                      onChange={(e) =>
-                        setSettings((s) => ({
-                          ...s,
-                          [field.key]: Number(e.target.value),
-                        }))
-                      }
-                    />
-                  )}
-                </label>
-              ))}
+              {CAMERA_OVERRIDE_FIELDS.map((field) => renderSettingField(field))}
             </div>
             <div className="settings-panel-footer">
               <button type="submit" className="settings-btn-primary">
@@ -333,6 +339,8 @@ export default function SettingsPage() {
             </div>
           </form>
         )}
+
+        {tab === 'collision' && isAdmin && <CollisionSettingsPanel />}
 
         {tab === 'users' && isAdmin && (
           <div className="settings-panel">

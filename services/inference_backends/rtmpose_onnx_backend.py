@@ -10,6 +10,7 @@ import numpy as np
 from services.inference_backends.base import PoseBatch
 from services.inference_backends.model_registry import RTMPOSE_VARIANT_ASSETS
 from services.inference_backends.onnx_assets import ensure_onnx_from_zip
+from services.inference_backends.ort_session import install_ort_session_defaults
 
 
 def _models_dir(app_config: dict) -> str:
@@ -50,6 +51,7 @@ def _preload_ort_cuda_dlls(device: str) -> None:
 def _ort_active_provider(onnx_path: str) -> str:
     import onnxruntime as ort
 
+    install_ort_session_defaults()
     sess = ort.InferenceSession(
         onnx_path,
         providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
@@ -77,6 +79,7 @@ class RTMPoseOnnxBackend:
         if self._det is not None and self._pose is not None:
             return
 
+        install_ort_session_defaults()
         from rtmlib.tools.object_detection.rtmdet import RTMDet
         from rtmlib.tools.pose_estimation.rtmpose import RTMPose
 

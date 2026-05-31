@@ -16,6 +16,7 @@ from services.inference_backends.model_registry import (
 _LITE_BACKENDS = LITE_BACKEND_FAMILIES
 from services.annotation_service import ensure_camera_annotation_file
 from services.runtime_config_service import get_effective_settings
+from services.inference_backends.ort_session import ort_container_env_defaults
 
 INFERENCE_CONTAINER_PREFIX = os.environ.get("INFERENCE_CONTAINER_PREFIX", "visual-dps-infer-")
 INFERENCE_IMAGE = os.environ.get("INFERENCE_IMAGE", "").strip()
@@ -359,6 +360,7 @@ def start_inference_container(camera: dict, request=None) -> dict:
             "services/hwaccel_probe.py",
             "services/nvidia_pip_cuda.py",
             "services/rtsp_capture.py",
+            "services/inference_backends/ort_session.py",
             "services/inference_backends/rtmpose_onnx_backend.py",
         ):
             binds.append(_host_bind(rel, read_only=True))
@@ -389,6 +391,7 @@ def start_inference_container(camera: dict, request=None) -> dict:
         "POSE_STREAM_GROUP": os.environ.get("POSE_STREAM_GROUP", "event-workers"),
         "POSE_STREAM_MAXLEN": os.environ.get("POSE_STREAM_MAXLEN", "2000"),
     }
+    env.update(ort_container_env_defaults())
     if use_gpu:
         env["LD_LIBRARY_PATH"] = _infer_gpu_ld_library_path()
 

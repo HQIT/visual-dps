@@ -1,6 +1,13 @@
 import InferenceToggle from './InferenceToggle';
 import { CAMERA_OVERRIDE_FIELDS, formatSettingDisplayValue } from '../lib/cameraSettings';
 import {
+  EDGE_CAPABILITIES,
+  INFERENCE_MODES,
+  edgeInferDisplay,
+  edgeOnlineLabel,
+  normalizeInferenceMode,
+} from '../lib/cameraModes';
+import {
   CAMERA_SOURCE_TYPES,
   DEFAULT_SOURCE_TYPE,
   defaultPlaybackUrl,
@@ -41,6 +48,9 @@ export default function CameraSetupDrawer({
   const inferStatus = infer?.status || 'stopped';
   const settings = form.settings || {};
   const inferOn = inferStatus === 'running' || inferStatus === 'starting';
+  const edgeMode = normalizeInferenceMode(form.inference_mode) === 'edge';
+  const edgeCaps = Array.isArray(form.edge_capabilities) ? form.edge_capabilities : ['pose'];
+  const needsVideo = !edgeMode || edgeCaps.includes('video');
 
   const setSettings = (next) => onChange('settings', next);
 
@@ -113,23 +123,41 @@ export default function CameraSetupDrawer({
                 </div>
                 <DetailRow
                   label="在线"
-                  value={camera.online ? '在线' : '离线'}
+                  value={
+                    edgeMode
+                      ? edgeOnlineLabel(camera) || '待上报'
+                      : camera.online
+                        ? '在线'
+                        : '离线'
+                  }
                 />
-                <DetailRow
-                  label="本次在线"
-                  value={formatDuration(camera._displayActivity ?? camera.activity_seconds)}
-                  title="自本次检测到在线起累计，离线后清零（非历史总时长）"
-                />
+                {!edgeMode ? (
+                  <DetailRow
+                    label="本次在线"
+                    value={formatDuration(camera._displayActivity ?? camera.activity_seconds)}
+                    title="自本次检测到在线起累计，离线后清零（非历史总时长）"
+                  />
+                ) : (
+                  <DetailRow
+                    label="边缘状态"
+                    value={edgeInferDisplay(camera) || '待上报'}
+                    title={camera.edge_runtime?.message || '由 POST /api/edge/v1/.../status 更新'}
+                  />
+                )}
                 <div className="detail-row detail-row--switch">
                   <span className="detail-label">智能检测</span>
                   <div className="detail-row-control">
-                    <InferenceToggle
-                      on={inferOn}
-                      loading={actionLoading}
-                      disabled={actionLoading}
-                      title={inferOn ? '关闭智能检测' : '开启智能检测'}
-                      onToggle={onToggleInference}
-                    />
+                    {edgeMode ? (
+                      <span className="detail-value">边缘节点上报（中心不启容器）</span>
+                    ) : (
+                      <InferenceToggle
+                        on={inferOn}
+                        loading={actionLoading}
+                        disabled={actionLoading}
+                        title={inferOn ? '关闭智能检测' : '开启智能检测'}
+                        onToggle={onToggleInference}
+                      />
+                    )}
                   </div>
                 </div>
                 <div className="detail-row detail-row--switch">
@@ -200,6 +228,46 @@ export default function CameraSetupDrawer({
               <p className="drawer-field-hint">
                 {CAMERA_SOURCE_TYPES.find((t) => t.value === (form.source_type || DEFAULT_SOURCE_TYPE))?.hint}
               </p>
+              <label>
+                检测来源
+                <select
+                  value={form.inference_mode || 'central'}
+                  onChange={(e) => onChange('inference_mode', e.target.value)}
+                >
+                  {INFERENCE_MODES.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p className="drawer-field-hint">
+                {INFERENCE_MODES.find((m) => m.value === (form.inference_mode || 'central'))?.hint}
+              </p>
+              {edgeMode ? (
+                <fieldset className="drawer-fieldset">
+                  <legend>边缘能力</legend>
+                  {EDGE_CAPABILITIES.map((cap) => (
+                    <label key={cap.value} className="drawer-check">
+                      <input
+                        type="checkbox"
+                        checked={edgeCaps.includes(cap.value)}
+                        onChange={(e) => {
+                          const next = new Set(edgeCaps);
+                          if (e.target.checked) next.add(cap.value);
+                          else next.delete(cap.value);
+                          if (!next.size) next.add('pose');
+                          onChange('edge_capabilities', [...next]);
+                        }}
+                      />
+                      {cap.label}
+                      {cap.hint ? (
+                        <span className="drawer-field-hint drawer-check-hint">{cap.hint}</span>
+                      ) : null}
+                    </label>
+                  ))}
+                </fieldset>
+              ) : null}
               {form.source_type === 'rtsp_pull' ? (
                 <>
                   <label>
@@ -240,8 +308,10 @@ export default function CameraSetupDrawer({
                   <input
                     value={form.url || ''}
                     onChange={(e) => onChange('url', e.target.value)}
-                    placeholder="rtsp://192.168.1.10:554/live"
-                    required
+                    placeholder={
+                      needsVideo ? 'rtsp://192.168.1.10:554/live' : '可选（仅边缘 pose 时可留空）'
+                    }
+                    required={needsVideo}
                   />
                 </label>
               ) : null}

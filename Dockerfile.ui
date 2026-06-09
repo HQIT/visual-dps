@@ -25,7 +25,8 @@ COPY docker/pip-install.sh /tmp/pip-install.sh
 RUN sh /tmp/pip-install.sh "${PIP_INDEX}" --upgrade pip \
     && sh /tmp/pip-install.sh "${PIP_INDEX}" \
         fastapi "uvicorn[standard]" opencv-python-headless docker redis \
-        "passlib[bcrypt]" "bcrypt<4.1" httpx itsdangerous python-multipart
+        "passlib[bcrypt]" "bcrypt<4.1" httpx itsdangerous python-multipart \
+        "PyJWT[crypto]"
 
 COPY services ./services
 COPY core ./core

@@ -72,6 +72,19 @@ class EventRedisWorker:
         self._redis: aioredis.Redis | None = None
         self._pubsub: aioredis.client.PubSub | None = None
         self._last_pending_claim_at = 0.0
+        self._camera_ips_file = (
+            os.environ.get("CAMERA_IPS_FILE", "").strip()
+            or str(app_config.get("paths", {}).get("camera_ips_file", "localdata/camera_ips.json"))
+        )
+
+    def _edge_collision_enabled(self, camera_id: str) -> bool:
+        from services.camera_modes import edge_expects_collision
+        from services.camera_store import get_camera
+
+        found = get_camera(self._camera_ips_file, camera_id)
+        if found.get("error"):
+            return False
+        return edge_expects_collision(found.get("camera"))
 
     def _resolve_json_path(self, camera_id: str) -> str:
         rel = camera_annotation_path(self._json_dir, camera_id)
@@ -325,6 +338,9 @@ class EventRedisWorker:
         if self._delivery != "stream" and not owns_camera(
             camera_id, self._shard_count, self._shard_index
         ):
+            return
+
+        if self._edge_collision_enabled(camera_id):
             return
 
         infer_w = int(pose.get("infer_width") or 0)

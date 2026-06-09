@@ -215,16 +215,24 @@ def get_inference_status(camera_id: str) -> dict:
 
 
 def attach_inference_status(cameras: list[dict]) -> list[dict]:
+    from services.camera_modes import is_edge_camera
+
     docker_map = _inference_containers_by_camera_id()
     result = []
     for cam in cameras:
         cid = str(cam.get("id") or "")
-        container = docker_map.get(cid) if cid else None
-        inference = (
-            _compose_inference_status(cid, container)
-            if cid
-            else {"status": "stopped"}
-        )
+        if is_edge_camera(cam):
+            inference = {
+                "status": "edge",
+                "message": "边缘节点上报 pose",
+                "container_name": "",
+                "docker_status": "edge",
+            }
+        elif cid:
+            container = docker_map.get(cid)
+            inference = _compose_inference_status(cid, container)
+        else:
+            inference = {"status": "stopped"}
         result.append({**cam, "inference": inference})
     return result
 
@@ -318,6 +326,11 @@ def _stream_url_for_container(url: str) -> str:
 
 def start_inference_container(camera: dict, request=None) -> dict:
     import docker
+
+    from services.camera_modes import is_edge_camera
+
+    if is_edge_camera(camera):
+        return {"error": "该摄像头为边缘推理模式，请在边缘节点上报 pose，勿启动中心检测容器"}
 
     camera_id = str(camera.get("id") or camera.get("path") or "").strip()
     if not camera_id:

@@ -245,6 +245,12 @@ def register_camera_routes(
         if found.get("error"):
             audit_from_result(request, "inference.start", "camera", camera_id, found)
             return found
+        from services.camera_modes import is_edge_camera
+
+        if is_edge_camera(found["camera"]):
+            err = {"error": "该摄像头为边缘推理模式，请在边缘节点上报 pose，勿启动中心检测容器"}
+            audit_from_result(request, "inference.start", "camera", camera_id, err)
+            return err
         result = start_inference_container(found["camera"], request=request)
         audit_from_result(request, "inference.start", "camera", camera_id, result)
         return result

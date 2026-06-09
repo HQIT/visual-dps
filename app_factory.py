@@ -18,6 +18,7 @@ from core.state import STATE
 from services.annotation_service import flatten_annotation_boxes, load_annotation, save_annotation
 from services.callback_reporter import CollisionCallbackReporter
 from services.camera_routes import register_camera_routes
+from services.edge_routes import register_edge_routes
 from services.camera_service import get_last_frame_b64
 from services.camera_store import load_cameras
 from services.inference_service import InferenceService
@@ -126,6 +127,15 @@ def create_app():
         default_json_file=paths["default_json_file"],
         last_frame_file=paths["last_frame_file"],
         capture_height=int(video_cfg["capture_height"]),
+    )
+
+    register_edge_routes(
+        api_router,
+        camera_ips_file=paths["camera_ips_file"],
+        app_config=app_config,
+        json_dir=paths["json_dir"],
+        default_json_file=paths["default_json_file"],
+        callback_reporter=callback_reporter,
     )
 
     @api_router.get("/last_frame")

@@ -12,6 +12,7 @@ from services.auth_service import get_session_user
 PUBLIC_PREFIXES = (
     "/api/version",
     "/api/auth/",
+    "/api/edge/",
     "/assets/",
 )
 

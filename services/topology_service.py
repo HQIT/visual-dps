@@ -10,7 +10,9 @@ from typing import Any
 from urllib.parse import urlparse
 
 from services.annotation_service import load_camera_annotation
+from services.camera_modes import edge_expects_pose, is_edge_camera
 from services.camera_service import normalize_rtsp_url
+from services.edge_status import build_edge_runtime
 from services.inference_container_service import (
     _compose_inference_status,
     _docker_client,
@@ -343,16 +345,18 @@ def _assess_pose_status(
     generated_at: float,
     infer_running: bool,
     mtx_ready: bool,
+    edge_pose_expected: bool = False,
 ) -> dict[str, Any]:
     """根据 Redis pose 快照与 stream 最近帧判断发布是否新鲜、是否冻结在旧画面。"""
-    snap = get_pose_snapshot(camera_id) if infer_running else None
+    expect_source = bool(infer_running or edge_pose_expected)
+    snap = get_pose_snapshot(camera_id) if expect_source else None
     ts = float(snap["ts"]) if snap and snap.get("ts") is not None else None
     age_sec = round(generated_at - ts, 2) if ts is not None else None
     publishing = age_sec is not None and age_sec <= _TOPOLOGY_POSE_STALE_SEC
 
     frozen = False
     recent_frame_delta: int | None = None
-    recent = list_recent_pose_frames(camera_id, limit=6) if infer_running else []
+    recent = list_recent_pose_frames(camera_id, limit=6) if expect_source else []
     if len(recent) >= 2:
         newest, older = recent[0], recent[1]
         fi_n = newest.get("frame_idx")
@@ -365,7 +369,7 @@ def _assess_pose_status(
             if recent_frame_delta and (newest.get("persons") or []) == (older.get("persons") or []):
                 frozen = True
 
-    expect_pose = bool(infer_running and mtx_ready)
+    expect_pose = bool(expect_source and (mtx_ready or edge_pose_expected))
     return {
         "snapshot_present": snap is not None,
         "last_ts_age_sec": age_sec,
@@ -529,6 +533,15 @@ def build_topology_overview(
         infer_status = (
             _compose_inference_status(cid, container) if cid else {"status": "stopped"}
         )
+        edge_cam = is_edge_camera(cam)
+        edge_pose = edge_expects_pose(cam)
+        if edge_cam:
+            infer_status = {
+                **infer_status,
+                "status": "edge",
+                "docker_status": "edge",
+                "message": "边缘节点上报 pose",
+            }
         infer_stream = normalize_rtsp_url(
             str(infer_status.get("stream_url") or playback_url or "")
         )
@@ -647,13 +660,29 @@ def build_topology_overview(
             )
 
         infer_running = infer_status.get("status") in ("running", "starting")
+        edge_runtime = build_edge_runtime(cid, now=generated_at) if edge_cam else None
         pose_status = _assess_pose_status(
             cid,
             generated_at=generated_at,
             infer_running=infer_running,
             mtx_ready=mtx_ready,
+            edge_pose_expected=edge_pose,
         )
         last_pose_age_sec = pose_status.get("last_ts_age_sec")
+
+        if edge_cam and edge_runtime and not edge_runtime.get("agent_alive"):
+            path_issues.append("EDGE_STATUS_STALE")
+            if path_health == "ok":
+                path_health = "warn"
+            issues.append(
+                _issue(
+                    "EDGE_STATUS_STALE",
+                    "warn",
+                    "边缘节点状态未更新（可能失联或未配置 status 上报）",
+                    "请确认 edge 进程运行并周期性 POST /api/edge/v1/cameras/{id}/status",
+                    camera_id=cid,
+                )
+            )
 
         if pose_status.get("expect_pose"):
             if pose_status.get("frozen"):
@@ -670,21 +699,34 @@ def build_topology_overview(
                     )
                 )
             elif not pose_status.get("publishing"):
-                path_issues.append("POSE_STALE")
-                if path_health == "ok":
-                    path_health = "warn"
-                issues.append(
-                    _issue(
-                        "POSE_STALE",
-                        "warn",
-                        f"推理运行中但 Redis 无新鲜 pose（>{_TOPOLOGY_POSE_STALE_SEC:.0f}s 未更新）",
-                        "检查 infer 是否拉流成功、RTSP_FRAME_BUFFER_TTL 是否已过期清帧",
-                        camera_id=cid,
-                    )
+                edge_idle_ok = bool(
+                    edge_cam
+                    and edge_runtime
+                    and edge_runtime.get("agent_alive")
+                    and edge_runtime.get("state") == "idle"
                 )
+                if edge_idle_ok:
+                    pass
+                else:
+                    path_issues.append("POSE_STALE")
+                    if path_health == "ok":
+                        path_health = "warn"
+                    issues.append(
+                        _issue(
+                            "POSE_STALE",
+                            "warn",
+                            f"{'边缘 pose' if edge_cam else '推理运行中但 Redis'} 无新鲜 pose（>{_TOPOLOGY_POSE_STALE_SEC:.0f}s 未更新）",
+                            "检查边缘 REST pose/status 上报或 infer 拉流与 RTSP_FRAME_BUFFER_TTL"
+                            if edge_cam
+                            else "检查 infer 是否拉流成功、RTSP_FRAME_BUFFER_TTL 是否已过期清帧",
+                            camera_id=cid,
+                        )
+                    )
 
         pose_edge_health = "unknown"
-        if infer_running:
+        if edge_cam and edge_runtime:
+            pose_edge_health = str(edge_runtime.get("health") or "unknown")
+        elif infer_running or edge_pose:
             if pose_status.get("frozen"):
                 pose_edge_health = "error"
             elif pose_status.get("publishing"):
@@ -715,6 +757,8 @@ def build_topology_overview(
                 infer_node_health = "warn"
             else:
                 infer_node_health = "ok"
+        elif docker_status == "edge":
+            infer_node_health = str((edge_runtime or {}).get("health") or "warn")
         elif docker_status == "starting":
             infer_node_health = "error" if path_health == "error" else "warn"
         elif docker_status == "error":
@@ -819,6 +863,7 @@ def build_topology_overview(
                     "infer_stream_probe": infer_stream_probe,
                     "external_publish_hint": external_hint,
                     "pose": pose_status,
+                    "edge": edge_runtime,
                 },
                 "mediamtx": {
                     "path": path_name,

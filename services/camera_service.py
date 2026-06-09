@@ -212,8 +212,21 @@ def enrich_camera_items(
     if with_inference:
         from services.inference_container_service import attach_inference_status
 
-        return attach_inference_status(result)
-    return result
+        result = attach_inference_status(result)
+
+    from services.camera_modes import is_edge_camera
+    from services.edge_status import build_edge_runtime
+
+    enriched = []
+    for item in result:
+        if is_edge_camera(item):
+            edge_runtime = build_edge_runtime(str(item.get("id") or ""))
+            inference = dict(item.get("inference") or {})
+            inference["message"] = edge_runtime.get("display") or inference.get("message") or ""
+            enriched.append({**item, "edge_runtime": edge_runtime, "inference": inference})
+        else:
+            enriched.append(item)
+    return enriched
 
 
 def list_cameras_with_status(

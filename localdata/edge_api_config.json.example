@@ -1,0 +1,6 @@
+{
+  "enabled": false,
+  "issuer": "https://keycloak.example.com/realms/visual-dps",
+  "audience": "visual-dps-edge",
+  "jwks_url": ""
+}

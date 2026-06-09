@@ -12,10 +12,13 @@ from services.auth_routes import register_auth_routes
 from services.auth_service import ensure_users_file
 from services.log_store import init_log_db
 from services.annotation_service import flatten_annotation_boxes, load_annotation, save_annotation
+from services.callback_reporter import CollisionCallbackReporter
 from services.camera_routes import register_camera_routes
 from services.camera_store import load_cameras
 from services.live_bus import live_hub
 from services.mediamtx_service import ensure_mediamtx_config
+from core.config import try_load_app_config
+from services.edge_routes import register_edge_routes
 from services.version_routes import register_version_routes
 
 app = FastAPI(title="visual-dps-dev")
@@ -39,12 +42,14 @@ async def auth_startup():
     )
     if mtx_fix:
         print(f"ℹ️ {mtx_fix['hint']}", flush=True)
+    await _callback_reporter.start()
     await live_hub.start()
 
 
 @app.on_event("shutdown")
 async def auth_shutdown():
     await live_hub.stop()
+    await _callback_reporter.stop()
 
 BASE_DIR = os.environ.get("BASE_DIR", ".")
 JSON_DIR = os.environ.get("JSON_DIR", "localdata/json")
@@ -67,6 +72,18 @@ register_camera_routes(
     default_json_file=DEFAULT_JSON,
     last_frame_file=LAST_FRAME,
     capture_height=CAPTURE_HEIGHT,
+)
+
+_app_config = try_load_app_config() or {}
+_callback_reporter = CollisionCallbackReporter(_app_config.get("reporting", {}))
+
+register_edge_routes(
+    api_router,
+    camera_ips_file=CAMERA_IPS_FILE,
+    app_config=_app_config,
+    json_dir=JSON_DIR,
+    default_json_file=DEFAULT_JSON,
+    callback_reporter=_callback_reporter,
 )
 
 

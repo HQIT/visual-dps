@@ -1,5 +1,7 @@
 /** 摄像头流类型与表单字段（与后端 source_type 对齐） */
 
+import { normalizeInferenceMode } from './cameraModes';
+
 export const DEFAULT_SOURCE_TYPE = 'rtsp_pull';
 
 export const CAMERA_SOURCE_TYPES = [
@@ -88,6 +90,8 @@ export function emptyCameraForm() {
     url: '',
     pull_url: '',
     enabled: true,
+    inference_mode: 'central',
+    edge_capabilities: ['pose'],
     settings: {},
   };
 }
@@ -103,6 +107,10 @@ export function cameraToForm(cam) {
     url,
     pull_url,
     enabled: cam.enabled !== false,
+    inference_mode: normalizeInferenceMode(cam.inference_mode),
+    edge_capabilities: Array.isArray(cam.edge_capabilities) && cam.edge_capabilities.length
+      ? [...cam.edge_capabilities]
+      : ['pose'],
     settings: { ...(cam.settings || {}) },
   };
 }
@@ -117,17 +125,26 @@ export function formToCameraPayload(form) {
     name,
     source_type,
     enabled: form.enabled !== false,
+    inference_mode: normalizeInferenceMode(form.inference_mode),
     settings: form.settings || {},
   };
+
+  if (payload.inference_mode === 'edge') {
+    payload.edge_capabilities = (form.edge_capabilities || ['pose']).filter(Boolean);
+  }
+
+  const needsVideo =
+    payload.inference_mode !== 'edge'
+    || (payload.edge_capabilities || []).includes('video');
 
   if (source_type === 'rtsp_pull') {
     payload.pull_url = String(form.pull_url || '').trim();
     payload.url = String(form.url || '').trim() || defaultPlaybackUrl(path);
   } else if (source_type === 'external') {
-    payload.url = String(form.url || '').trim();
+    payload.url = needsVideo ? String(form.url || '').trim() : String(form.url || '').trim();
     payload.pull_url = '';
   } else {
-    payload.url = String(form.url || '').trim() || defaultPlaybackUrl(path);
+    payload.url = String(form.url || '').trim() || (needsVideo ? defaultPlaybackUrl(path) : '');
     payload.pull_url = '';
   }
   return payload;

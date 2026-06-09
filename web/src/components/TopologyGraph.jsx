@@ -22,6 +22,7 @@ const KIND_TO_LAYER = {
 function nodeSubtitle(node) {
   if (node.kind === 'inference') {
     const st = String(node.meta?.docker_status || '').toLowerCase();
+    if (st === 'edge') return '边缘上报';
     if (st === 'stopped' || !st) return '检测未启动';
     if (st === 'starting') return '启动中';
   }

@@ -45,11 +45,12 @@ def build_event_frame(
     collisions: list,
     alarm_collisions: list,
     skeletons: list | None = None,
+    ts: float | None = None,
 ) -> dict[str, Any]:
     frame: dict[str, Any] = {
         "schema": EVENT_SCHEMA_VERSION,
         "kind": "event",
-        "ts": time.time(),
+        "ts": float(ts if ts is not None else time.time()),
         "camera_id": str(camera_id),
         "frame_idx": int(frame_idx),
         "collisions": list(collisions),
@@ -89,6 +90,27 @@ def publish_event_frame(
         return True
     except Exception as exc:
         logger.warning("Redis publish_event_frame failed camera=%s: %s", cid, exc)
+        return False
+
+
+def publish_event_frame_dict(frame: dict[str, Any]) -> bool:
+    """写入完整 EventFrame（供 edge REST 等外部来源）。"""
+    if not isinstance(frame, dict) or str(frame.get("kind") or "") != "event":
+        return False
+    cid = str(frame.get("camera_id") or "").strip()
+    if not cid:
+        return False
+    payload = json.dumps(frame, ensure_ascii=False, separators=(",", ":"))
+    try:
+        client = sync_redis.from_url(redis_url(), decode_responses=True)
+        pipe = client.pipeline(transaction=False)
+        pipe.set(snapshot_key_for(cid), payload, ex=SNAPSHOT_TTL_SEC)
+        pipe.publish(channel_for(cid), payload)
+        pipe.execute()
+        client.close()
+        return True
+    except Exception as exc:
+        logger.warning("Redis publish_event_frame_dict failed camera=%s: %s", cid, exc)
         return False
 
 

@@ -7,6 +7,14 @@ from typing import List
 from urllib.parse import urlparse
 
 from services.runtime_config_service import normalize_camera_settings
+from services.camera_modes import (
+    EDGE_CAPABILITY_POSE,
+    INFERENCE_MODE_CENTRAL,
+    INFERENCE_MODE_EDGE,
+    apply_camera_mode_fields,
+    normalize_edge_capabilities,
+    normalize_inference_mode,
+)
 from services.mediamtx_service import (
     SOURCE_EXTERNAL,
     SOURCE_PUBLISHER,
@@ -61,8 +69,16 @@ def _normalize_record(raw: dict) -> dict | None:
     if not name:
         name = path
 
+    inference_mode = normalize_inference_mode(raw.get("inference_mode"))
+    edge_caps = normalize_edge_capabilities(raw.get("edge_capabilities"))
+    pose_only_edge = (
+        inference_mode == INFERENCE_MODE_EDGE
+        and (not edge_caps or EDGE_CAPABILITY_POSE in edge_caps)
+        and "video" not in edge_caps
+    )
+
     if source_type == SOURCE_EXTERNAL:
-        if not url:
+        if not url and not pose_only_edge:
             return None
     else:
         if not url:
@@ -81,6 +97,7 @@ def _normalize_record(raw: dict) -> dict | None:
         settings = normalize_camera_settings(raw.get("settings"))
         if settings:
             record["settings"] = settings
+    apply_camera_mode_fields(record, raw)
     return record
 
 
@@ -149,11 +166,19 @@ def validate_camera_payload(data: dict, existing_id: str | None = None) -> tuple
         return None, "名称不能为空"
 
     if source_type == SOURCE_EXTERNAL:
-        if not url:
+        inference_mode = normalize_inference_mode(data.get("inference_mode"))
+        caps = normalize_edge_capabilities(data.get("edge_capabilities"))
+        pose_only_edge = (
+            inference_mode == INFERENCE_MODE_EDGE
+            and (not caps or EDGE_CAPABILITY_POSE in caps)
+            and "video" not in caps
+        )
+        if not url and not pose_only_edge:
             return None, "请填写完整的视频流地址"
-        url_err = _validate_stream_url(url)
-        if url_err:
-            return None, url_err
+        if url:
+            url_err = _validate_stream_url(url)
+            if url_err:
+                return None, url_err
     elif source_type == SOURCE_RTSP_PULL:
         if not pull_url:
             return None, "请填写上游视频流地址"
@@ -179,6 +204,12 @@ def validate_camera_payload(data: dict, existing_id: str | None = None) -> tuple
             raw_rec["settings"] = normalize_camera_settings(data.get("settings"), strict=True)
         except ValueError as exc:
             return None, str(exc)
+    mode = normalize_inference_mode(data.get("inference_mode"))
+    if mode != INFERENCE_MODE_CENTRAL:
+        raw_rec["inference_mode"] = mode
+    caps = normalize_edge_capabilities(data.get("edge_capabilities"))
+    if caps:
+        raw_rec["edge_capabilities"] = caps
     rec = _normalize_record(raw_rec)
     if not rec:
         return None, "配置无效"

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import CameraSetupDrawer from '../components/CameraSetupDrawer';
 import InferenceToggle from '../components/InferenceToggle';
 import { confirmDeleteCamera } from '../lib/confirmDelete';
+import { edgeInferDisplay, edgeOnlineLabel, isEdgeCamera } from '../lib/cameraModes';
 import { apiDelete, apiGet, apiPost, apiPut, formatDuration, thumbnailUrl } from '../api/client';
 import {
   STREAM_CONFIG_SAVED_HINT,
@@ -20,6 +21,7 @@ const INFER_LABEL = {
   starting: '检测启动中',
   error: '检测异常',
   paused: '检测已暂停',
+  edge: '边缘上报',
 };
 
 export default function DashboardPage() {
@@ -250,6 +252,7 @@ export default function DashboardPage() {
   };
 
   const startInference = async (cam) => {
+    if (isEdgeCamera(cam)) return;
     setInferLoadingId(cam.id);
     try {
       const data = await apiPost(`/api/cameras/${encodeURIComponent(cam.id)}/inference/start`, {});
@@ -389,11 +392,13 @@ export default function DashboardPage() {
                         cam.inference?.status === 'starting'
                       }
                       loading={inferLoadingId === cam.id}
-                      disabled={inferLoadingId === cam.id}
+                      disabled={inferLoadingId === cam.id || isEdgeCamera(cam)}
                       title={
-                        cam.inference?.status === 'running' || cam.inference?.status === 'starting'
-                          ? '关闭智能检测'
-                          : '开启智能检测'
+                        isEdgeCamera(cam)
+                          ? '边缘节点上报 pose，无需启动中心检测'
+                          : cam.inference?.status === 'running' || cam.inference?.status === 'starting'
+                            ? '关闭智能检测'
+                            : '开启智能检测'
                       }
                       onToggle={(turnOn) => toggleInference(cam, turnOn)}
                     />
@@ -418,17 +423,27 @@ export default function DashboardPage() {
                   <div className="card-body">
                     <h2 className="card-title">{cam.name}</h2>
                     <div className="card-status">
-                      <span className={cam.online ? 'st-online' : 'st-offline'}>
-                        {cam.online ? '在线' : '离线'}
+                      <span className={cam.online || isEdgeCamera(cam) ? 'st-online' : 'st-offline'}>
+                        {isEdgeCamera(cam)
+                          ? edgeOnlineLabel(cam) || '边缘'
+                          : cam.online
+                            ? '在线'
+                            : '离线'}
                       </span>
                       <span className="card-status-sep">·</span>
                       <span className="card-activity">{formatDuration(cam._displayActivity)}</span>
                       <span className="card-status-sep">·</span>
                       <span
                         className={`card-infer ${cam.inference?.status || 'stopped'}`}
-                        title={formatInferenceMessage(cam.inference?.message) || ''}
+                        title={
+                          formatInferenceMessage(cam.inference?.message)
+                          || (isEdgeCamera(cam) ? cam.edge_runtime?.message : '')
+                          || ''
+                        }
                       >
-                        {INFER_LABEL[cam.inference?.status] || INFER_LABEL.stopped}
+                        {isEdgeCamera(cam)
+                          ? edgeInferDisplay(cam)
+                          : INFER_LABEL[cam.inference?.status] || INFER_LABEL.stopped}
                       </span>
                     </div>
                     <div className="card-url" title={cam.url}>

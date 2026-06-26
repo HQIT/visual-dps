@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cameraStreamUrl } from '../api/client';
 import { usePreviewStream } from '../hooks/usePreviewStream';
-import { boxRoiKey, resolveMonitorShelves } from '../lib/annotation';
+import { boxMatchesAnyCollision, boxRoiKey, resolveMonitorShelves } from '../lib/annotation';
 import {
   computeContainLayout,
   mapPointsToVideoFrame,
@@ -38,9 +38,8 @@ function scaleInferPoint(x, y, inferW, inferH, frameW, frameH) {
 }
 
 function resolveRoiState(box, { inferRunning, hits, alarms }) {
-  const key = boxRoiKey(box);
-  if (key && alarms.has(key)) return 'alarm';
-  if (key && hits.has(key)) return 'hit';
+  if (boxMatchesAnyCollision(box, alarms)) return 'alarm';
+  if (boxMatchesAnyCollision(box, hits)) return 'hit';
   if (inferRunning) return 'monitoring';
   return 'configured';
 }
@@ -157,10 +156,20 @@ function RoiMinimapGrid({ minimap, shelfLabel }) {
   );
 }
 
-function RoiOverviewPanel({ legendItems, shelfPanels }) {
+function RoiOverviewPanel({ legendItems, shelfPanels, hitCount = 0, alarmCount = 0, inferRunning = false }) {
   const hasCells = shelfPanels.some((p) => p.minimap.cells.length > 0);
   return (
     <div className="monitor-panel-content">
+      {inferRunning ? (
+        <div className="monitor-roi-live-stats" aria-live="polite">
+          <span className={`monitor-roi-stat monitor-roi-stat-hit${hitCount ? ' active' : ''}`}>
+            碰撞 {hitCount}
+          </span>
+          <span className={`monitor-roi-stat monitor-roi-stat-alarm${alarmCount ? ' active' : ''}`}>
+            告警 {alarmCount}
+          </span>
+        </div>
+      ) : null}
       <ul className="monitor-legend">
         {legendItems.map((item) => (
           <li key={item.className}>
@@ -443,7 +452,13 @@ export default function MonitorPreviewStage({
 
   const panelModeLabel = annotateMode ? '标注' : '监控';
   const panelBody = annotateMode ? annotatePanel : (
-    <RoiOverviewPanel legendItems={legendItems} shelfPanels={shelfPanels} />
+    <RoiOverviewPanel
+      legendItems={legendItems}
+      shelfPanels={shelfPanels}
+      hitCount={hits.length}
+      alarmCount={alarms.length}
+      inferRunning={inferRunning}
+    />
   );
 
   return (

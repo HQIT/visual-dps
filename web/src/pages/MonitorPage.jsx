@@ -6,7 +6,7 @@ import MonitorPreviewStage from '../components/MonitorPreviewStage';
 import ShelfBar from '../components/ShelfBar';
 import ShelfDrawer, { emptyShelfForm } from '../components/ShelfDrawer';
 import { useAnnotateTool } from '../features/annotate/useAnnotateTool';
-import { boxRoiKey, parseAnnotationPayload } from '../lib/annotation';
+import { boxMatchesAnyCollision, parseAnnotationPayload } from '../lib/annotation';
 import { getPerspectiveTransform, perspectiveTransform } from '../lib/geometry';
 import { apiGet, apiPost, cameraPlaybackUrl, openCameraLiveStream } from '../api/client';
 import { resolveCameraModelLabel } from '../lib/cameraSettings';
@@ -286,9 +286,8 @@ export default function MonitorPage() {
         ctxRaw.lineWidth = 2;
 
         s.finalBoxes.forEach((box) => {
-          const boxKey = boxRoiKey(box);
-          const isRawHit = collisionSet.has(boxKey);
-          const isAlarmHit = alarmSet.has(boxKey);
+          const isAlarmHit = boxMatchesAnyCollision(box, alarmSet);
+          const isRawHit = !isAlarmHit && boxMatchesAnyCollision(box, collisionSet);
           ctxRaw.strokeStyle = isAlarmHit ? '#ff0000' : isRawHit ? '#ffd166' : 'rgba(0,255,0,0.25)';
           ctxRaw.beginPath();
           ctxRaw.moveTo(box.video_polygon[0][0] * coordScale, box.video_polygon[0][1] * coordScale);
@@ -299,9 +298,8 @@ export default function MonitorPage() {
 
         ctxSkel.lineWidth = 2;
         s.finalBoxes.forEach((box) => {
-          const boxKey = boxRoiKey(box);
-          const isRawHit = collisionSet.has(boxKey);
-          const isAlarmHit = alarmSet.has(boxKey);
+          const isAlarmHit = boxMatchesAnyCollision(box, alarmSet);
+          const isRawHit = !isAlarmHit && boxMatchesAnyCollision(box, collisionSet);
           ctxSkel.strokeStyle = isAlarmHit ? '#ff0000' : isRawHit ? '#ffd166' : 'rgba(0,255,0,0.2)';
           ctxSkel.beginPath();
           ctxSkel.moveTo(box.video_polygon[0][0] * coordScale, box.video_polygon[0][1] * coordScale);
@@ -332,9 +330,8 @@ export default function MonitorPage() {
         s.finalBoxes.forEach((box) => {
           const x = (box.column - 1) * cw;
           const y = (box.layer - 1) * ch;
-          const boxKey = boxRoiKey(box);
-          const isRawHit = collisionSet.has(boxKey);
-          const isAlarmHit = alarmSet.has(boxKey);
+          const isAlarmHit = boxMatchesAnyCollision(box, alarmSet);
+          const isRawHit = !isAlarmHit && boxMatchesAnyCollision(box, collisionSet);
           ctxGrid.fillStyle = isAlarmHit ? '#ff4757' : isRawHit ? '#f39c12' : '#3742fa';
           ctxGrid.fillRect(x + 2, y + 2, cw - 4, ch - 4);
           ctxGrid.strokeStyle = isAlarmHit ? '#ff6b81' : isRawHit ? '#f5b041' : '#5352ed';

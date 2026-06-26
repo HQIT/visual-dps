@@ -28,6 +28,10 @@ from services.pose_bus import (
 logger = logging.getLogger(__name__)
 
 
+def _collision_log_enabled() -> bool:
+    return os.environ.get("COLLISION_LOG", "").strip().lower() in ("1", "true", "yes", "on")
+
+
 class _CameraContext:
     def __init__(
         self,
@@ -108,6 +112,27 @@ class EventRedisWorker:
             self._contexts[camera_id] = ctx
 
         return ctx.processor
+
+    def _log_collisions(
+        self,
+        camera_id: str,
+        frame_idx: int,
+        collisions: list,
+        alarm_collisions: list,
+    ) -> None:
+        if not _collision_log_enabled():
+            return
+        if collisions:
+            print(
+                f"[COLLISION][HIT] camera={camera_id} frame={frame_idx} hits={collisions}",
+                flush=True,
+            )
+        if alarm_collisions:
+            print(
+                f"[COLLISION][ALARM] camera={camera_id} frame={frame_idx} "
+                f"alarms={alarm_collisions} hits={collisions}",
+                flush=True,
+            )
 
     async def start(self) -> None:
         if self._listener_task and not self._listener_task.done():
@@ -244,6 +269,8 @@ class EventRedisWorker:
         collisions = result.get("collisions") or []
         alarm_collisions = result.get("alarm_collisions") or []
         skeletons = result.get("skeletons")
+
+        self._log_collisions(camera_id, frame_idx, collisions, alarm_collisions)
 
         await asyncio.to_thread(
             publish_event_frame,

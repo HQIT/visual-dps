@@ -31,6 +31,26 @@ def _snapshot_stream_frame(cap):
     return read_latest_frame(cap)
 
 
+def _read_file_frame(cap):
+    """顺序读本地文件一帧，并在同线程立即捕获媒体时间（避免 POS_MSEC 滞后）。"""
+    ret, frame = cap.read()
+    if not ret or frame is None:
+        return False, None, 0.0, 0
+    pos_msec = float(cap.get(cv2.CAP_PROP_POS_MSEC) or 0.0)
+    pos_frames = int(cap.get(cv2.CAP_PROP_POS_FRAMES) or 0)
+    return True, frame, pos_msec, pos_frames
+
+
+def _open_file_capture(video_path: str):
+    cap = cv2.VideoCapture(video_path)
+    if cap is not None and cap.isOpened():
+        try:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        except Exception:
+            pass
+    return cap
+
+
 def _parse_cuda_device_index(device_name: str) -> int:
     name = (device_name or "").strip().lower()
     if name.startswith("cuda:"):
@@ -158,7 +178,17 @@ class InferenceService:
 
         self.state.is_inferencing = True
 
-        if self.state.source_type == "stream":
+        headless = (
+            self.state.source_type == "stream"
+            or (
+                self.state.source_type == "file"
+                and (
+                    os.environ.get("INFERENCE_CAMERA_ID", "").strip()
+                    or os.environ.get("INFERENCE_RUN_ID", "").strip()
+                )
+            )
+        )
+        if headless:
             if self._background_task is None or self._background_task.done():
                 self._background_task = asyncio.create_task(self.websocket_inference(_NullWebSocket()))
             return {"status": "success", "mode": "headless"}
@@ -223,7 +253,7 @@ class InferenceService:
             cap = open_rtsp_capture(self.state.video_path, buffer_size=stream_buffer_size)
             print("ℹ️ RTSP 采帧：后台线程刷新最新帧，推理仅消费快照副本")
         else:
-            cap = cv2.VideoCapture(self.state.video_path)
+            cap = _open_file_capture(self.state.video_path)
 
         video_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
         stream_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -280,7 +310,23 @@ class InferenceService:
         cached_collisions = []
         cached_alarm_collisions = []
         inference_camera_id = os.environ.get("INFERENCE_CAMERA_ID", "").strip()
+        benchmark_run_id = os.environ.get("INFERENCE_RUN_ID", "").strip()
+        file_debug_logged = 0
         headless_stream = is_stream and is_null_ws
+        headless_file = (not is_stream) and is_null_ws
+        realtime_playback = os.environ.get("INFERENCE_REALTIME", "").strip().lower() not in (
+            "0",
+            "false",
+            "no",
+            "off",
+        )
+        if headless_file and benchmark_run_id:
+            realtime_playback = os.environ.get("INFERENCE_REALTIME", "0").strip().lower() in (
+                "1",
+                "true",
+                "yes",
+                "on",
+            )
 
         try:
             while cap.isOpened() and self.state.is_inferencing:
@@ -295,13 +341,15 @@ class InferenceService:
                         await asyncio.sleep(sleep_skip)
                     continue
 
+                file_pos_msec = 0.0
+                file_pos_frames = 0
                 if is_stream:
                     ret, frame, _captured_at = await asyncio.get_running_loop().run_in_executor(
                         self._executor, _snapshot_stream_frame, cap
                     )
                 else:
-                    ret, frame = await asyncio.get_running_loop().run_in_executor(
-                        self._executor, cap.read
+                    ret, frame, file_pos_msec, file_pos_frames = await asyncio.get_running_loop().run_in_executor(
+                        self._executor, _read_file_frame, cap
                     )
 
                 inference_tick += 1
@@ -323,14 +371,21 @@ class InferenceService:
                 else:
                     raw_frame = frame
 
-                if run_pose or not headless_stream:
+                if run_pose or not (headless_stream or headless_file):
+                    det_started = time.monotonic()
                     cached_bboxes = await self._run_detection(raw_frame)
+                    det_ms = (time.monotonic() - det_started) * 1000.0
+                else:
+                    det_ms = 0.0
 
                 if run_pose:
                     skeletons_data = []
+                    pose_ms = 0.0
 
                     if len(cached_bboxes) > 0:
+                        pose_started = time.monotonic()
                         pose_batch = await self._run_pose(raw_frame, cached_bboxes)
+                        pose_ms = (time.monotonic() - pose_started) * 1000.0
                         kpts_all = pose_batch.keypoints
                         scores_all = pose_batch.keypoint_scores
 
@@ -349,15 +404,43 @@ class InferenceService:
 
                     cached_skeletons_data = skeletons_data
 
-                    if is_null_ws and inference_camera_id:
+                    from services.video_time import compute_video_time_sec, format_video_time
+
+                    if not is_stream:
+                        video_time_sec = compute_video_time_sec(
+                            frame_count,
+                            video_fps,
+                            pos_msec=file_pos_msec,
+                            pos_frames=file_pos_frames,
+                        )
+                        if benchmark_run_id and file_debug_logged < 3:
+                            file_debug_logged += 1
+                            print(
+                                f"ℹ️ [bench-time] frame_idx={frame_count} pos_frames={file_pos_frames} "
+                                f"pos_msec={file_pos_msec:.1f} video_time={format_video_time(video_time_sec)}"
+                            )
+                    else:
+                        video_time_sec = compute_video_time_sec(frame_count, video_fps)
+
+                    if is_null_ws and (inference_camera_id or benchmark_run_id):
                         from services.pose_bus import publish_pose_frame
 
+                        loop_ms = (time.monotonic() - loop_started_at) * 1000.0
                         publish_pose_frame(
-                            inference_camera_id,
+                            inference_camera_id or f"bench_{benchmark_run_id}",
                             frame_idx=frame_count,
                             persons=skeletons_data,
                             infer_width=infer_w,
                             infer_height=infer_h,
+                            source_mode="file" if not is_stream else "stream",
+                            run_id=benchmark_run_id,
+                            video_time_sec=video_time_sec,
+                            video_fps=video_fps,
+                            latency_ms={
+                                "detect": round(det_ms, 2),
+                                "pose": round(pose_ms, 2),
+                                "total": round(loop_ms, 2),
+                            },
                         )
 
                 skeletons_data = cached_skeletons_data
@@ -377,7 +460,17 @@ class InferenceService:
                 elapsed = time.time() - start_time
                 current_fps = frame_count / elapsed if elapsed > 0 else 0
 
-                video_time_sec = frame_count / video_fps
+                from services.video_time import compute_video_time_sec
+
+                if not is_stream:
+                    video_time_sec = compute_video_time_sec(
+                        frame_count,
+                        video_fps,
+                        pos_msec=file_pos_msec,
+                        pos_frames=file_pos_frames,
+                    )
+                else:
+                    video_time_sec = compute_video_time_sec(frame_count, video_fps)
                 m, s = int(video_time_sec // 60), int(video_time_sec % 60)
                 ms = int((video_time_sec - int(video_time_sec)) * 1000)
                 formatted_time = f"{m:02d}:{s:02d}.{ms:03d}"
@@ -425,8 +518,16 @@ class InferenceService:
                 if headless_stream and run_pose:
                     pose_period = frame_period_sec * pose_frame_interval
                     sleep_sec = pose_period - elapsed_loop
-                else:
+                elif headless_file and realtime_playback:
+                    if run_pose:
+                        pose_period = frame_period_sec * pose_frame_interval
+                        sleep_sec = pose_period - elapsed_loop
+                    else:
+                        sleep_sec = frame_period_sec - elapsed_loop
+                elif not headless_file:
                     sleep_sec = frame_period_sec - elapsed_loop
+                else:
+                    sleep_sec = 0.0
                 if sleep_sec > 0:
                     await asyncio.sleep(sleep_sec)
 

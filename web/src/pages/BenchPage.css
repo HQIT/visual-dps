@@ -1,0 +1,431 @@
+/* 与 Dashboard / Monitor 深色主题一致 */
+.bench-page {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 1rem 1.25rem 2rem;
+  color: #e8f0f6;
+}
+
+.bench-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.bench-header h1 {
+  margin: 0 0 0.35rem;
+  font-size: 1.45rem;
+  font-weight: 600;
+}
+
+.bench-header p {
+  margin: 0;
+  color: #8fa3b5;
+  font-size: 0.92rem;
+}
+
+.bench-card {
+  margin-top: 1rem;
+  padding: 1rem 1.15rem;
+  border: 1px solid #2b3a45;
+  border-radius: 10px;
+  background: #141c22;
+}
+
+.bench-card h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #eaf2f8;
+}
+
+.bench-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem 1rem;
+}
+
+.bench-form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.88rem;
+  color: #9eb0c0;
+}
+
+.bench-field-hint {
+  font-size: 0.76rem;
+  color: #6f8496;
+  line-height: 1.35;
+}
+
+.bench-form-grid select,
+.bench-form-grid input[type='text'],
+.bench-form-grid input[type='file'] {
+  font: inherit;
+  background: #0f161c;
+  border: 1px solid #3a4f5f;
+  color: #e8f0f6;
+  border-radius: 6px;
+  padding: 0.4rem 0.55rem;
+}
+
+.bench-actions {
+  display: flex;
+  gap: 0.6rem;
+  margin-top: 0.85rem;
+}
+
+.bench-actions button {
+  font: inherit;
+  padding: 0.45rem 0.95rem;
+  border-radius: 6px;
+  border: 1px solid #3a4f5f;
+  background: #1e2d38;
+  color: #e8f0f6;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.bench-actions button:hover:not(:disabled) {
+  border-color: #4a6275;
+}
+
+.bench-actions button.primary {
+  background: #00d4aa;
+  border-color: #00b894;
+  color: #072018;
+  font-weight: 600;
+}
+
+.bench-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.bench-preview-wrap {
+  margin-top: 1rem;
+}
+
+.bench-alignment {
+  margin-bottom: 0.65rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  border: 1px solid transparent;
+}
+
+.bench-alignment.ok {
+  background: #0d2a22;
+  border-color: #1f6b52;
+  color: #7dffc8;
+}
+
+.bench-alignment.warn {
+  background: #2a2210;
+  border-color: #7a5a1a;
+  color: #ffd48a;
+}
+
+.bench-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  margin-bottom: 0.65rem;
+  font-size: 0.82rem;
+  color: #8fa3b5;
+}
+
+.bench-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.bench-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  display: inline-block;
+}
+
+.bench-legend-dot.is-configured { background: #4caf50; }
+.bench-legend-dot.is-monitoring { background: #2196f3; }
+.bench-legend-dot.is-hit { background: #ffc107; }
+.bench-legend-dot.is-alarm { background: #f44336; }
+
+.bench-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.bench-table th,
+.bench-table td {
+  border-bottom: 1px solid #2b3a45;
+  padding: 0.55rem 0.45rem;
+  text-align: left;
+}
+
+.bench-table th {
+  color: #8fa3b5;
+  font-weight: 500;
+}
+
+.bench-table a {
+  color: #00d4aa;
+  text-decoration: none;
+}
+
+.bench-table a:hover {
+  text-decoration: underline;
+}
+
+.bench-row-actions {
+  display: flex;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.bench-row-actions .linkish {
+  border: none;
+  background: none;
+  color: #ff6b6b;
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+}
+
+.bench-status.is-running { color: #64b5f6; }
+.bench-status.is-finished { color: #00d4aa; }
+.bench-status.is-error { color: #ff6b6b; }
+
+.bench-error {
+  margin-top: 0.75rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+  background: #2a1518;
+  border: 1px solid #6b3038;
+  color: #ff8a8a;
+}
+
+.bench-empty {
+  color: #8fa3b5;
+}
+
+.bench-back {
+  display: inline-block;
+  margin-bottom: 0.35rem;
+  font-size: 0.88rem;
+  color: #00d4aa;
+  text-decoration: none;
+}
+
+.bench-back:hover {
+  text-decoration: underline;
+}
+
+.bench-replay-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) min(320px, 34vw);
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+/* 回放：视频与骨架/货框共用 MonitorPreviewStage 内层，避免黑底 overlay 盖住视频 */
+.bench-replay-stage .monitor-stage.is-compact-preview .monitor-stage-viewport {
+  aspect-ratio: auto;
+  max-height: min(72vh, 820px);
+  min-height: min(52vh, 520px);
+}
+
+.bench-replay-stage .monitor-stage-media-fit {
+  pointer-events: auto;
+}
+
+.bench-replay-time {
+  margin-top: 0.45rem;
+  font-size: 0.9rem;
+  color: #8fa3b5;
+}
+
+.bench-replay-drift {
+  color: #c9a227;
+}
+
+.bench-replay-side {
+  border: 1px solid #2b3a45;
+  border-radius: 10px;
+  padding: 0.75rem;
+  max-height: 70vh;
+  overflow: auto;
+  background: #141c22;
+}
+
+.bench-replay-side-head h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #eaf2f8;
+}
+
+.bench-replay-side-stats {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  color: #8fa3b5;
+}
+
+.bench-event-filters {
+  display: flex;
+  gap: 0.35rem;
+  margin: 0.65rem 0 0.5rem;
+}
+
+.bench-event-filter {
+  flex: 1;
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.3rem 0.4rem;
+  border-radius: 6px;
+  border: 1px solid #2b3a45;
+  background: #0f161c;
+  color: #9eb0c0;
+  cursor: pointer;
+}
+
+.bench-event-filter.active {
+  border-color: #00d4aa;
+  color: #e8f0f6;
+  background: #152028;
+}
+
+.bench-event-list {
+  list-style: none;
+  margin: 0.35rem 0 0;
+  padding: 0;
+}
+
+.bench-event-group-btn {
+  width: 100%;
+  text-align: left;
+  border: 1px solid #2b3a45;
+  border-radius: 8px;
+  background: #0f161c;
+  color: #e8f0f6;
+  padding: 0.45rem 0.55rem;
+  margin-bottom: 0.45rem;
+  cursor: pointer;
+  font: inherit;
+}
+
+.bench-event-group-btn:hover,
+.bench-event-group-btn.is-active {
+  border-color: #00d4aa;
+}
+
+.bench-event-group-btn.is-active {
+  background: #152028;
+}
+
+.bench-event-group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.84rem;
+}
+
+.bench-event-group-head strong {
+  font-weight: 600;
+  color: #eaf2f8;
+}
+
+.bench-event-group-head span {
+  color: #8fa3b5;
+  font-size: 0.78rem;
+}
+
+.bench-event-items {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.bench-event-item {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.8rem;
+}
+
+.bench-event-kind {
+  flex-shrink: 0;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.bench-event-kind.is-collision {
+  background: rgba(201, 162, 39, 0.18);
+  color: #e6c04a;
+  border: 1px solid rgba(201, 162, 39, 0.35);
+}
+
+.bench-event-kind.is-alarm {
+  background: rgba(220, 72, 72, 0.18);
+  color: #ff8a8a;
+  border: 1px solid rgba(220, 72, 72, 0.35);
+}
+
+.bench-event-box {
+  color: #c5d4e0;
+  word-break: break-all;
+}
+
+.bench-replay-toggles {
+  display: flex;
+  gap: 0.75rem;
+  font-size: 0.88rem;
+  color: #9eb0c0;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.bench-rerun-btn {
+  font: inherit;
+  font-size: 0.84rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid #3a4f5f;
+  background: #0f161c;
+  color: #e8f0f6;
+  cursor: pointer;
+}
+
+.bench-rerun-btn:hover:not(:disabled) {
+  border-color: #00d4aa;
+}
+
+.bench-rerun-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.bench-replay-toggles label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+}
+
+@media (max-width: 900px) {
+  .bench-replay-layout {
+    grid-template-columns: 1fr;
+  }
+}

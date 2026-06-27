@@ -28,6 +28,9 @@ export default function AppNav() {
         <NavLink to="/topology">
           服务拓扑
         </NavLink>
+        <NavLink to="/bench">
+          离线评测
+        </NavLink>
         </div>
       </div>
       {authRequired && user && (

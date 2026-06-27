@@ -48,8 +48,13 @@ def build_pose_frame(
     persons: list,
     infer_width: int,
     infer_height: int,
+    source_mode: str = "stream",
+    run_id: str = "",
+    video_time_sec: float | None = None,
+    video_fps: float | None = None,
+    latency_ms: dict | None = None,
 ) -> dict[str, Any]:
-    return {
+    frame: dict[str, Any] = {
         "schema": POSE_SCHEMA_VERSION,
         "kind": "pose",
         "ts": time.time(),
@@ -58,7 +63,21 @@ def build_pose_frame(
         "infer_width": int(infer_width),
         "infer_height": int(infer_height),
         "persons": list(persons),
+        "source_mode": str(source_mode or "stream"),
     }
+    if run_id:
+        frame["run_id"] = str(run_id)
+    if video_time_sec is not None:
+        frame["video_time_sec"] = float(video_time_sec)
+    if video_fps is not None:
+        frame["video_fps"] = float(video_fps)
+    if latency_ms:
+        frame["latency_ms"] = dict(latency_ms)
+    return frame
+
+
+def is_benchmark_pose(frame: dict[str, Any]) -> bool:
+    return bool(str(frame.get("run_id") or "").strip()) or frame.get("source_mode") == "file"
 
 
 def ensure_pose_stream_group(client: sync_redis.Redis | None = None) -> None:
@@ -83,18 +102,32 @@ def publish_pose_frame(
     persons: list,
     infer_width: int,
     infer_height: int,
+    source_mode: str = "stream",
+    run_id: str = "",
+    video_time_sec: float | None = None,
+    video_fps: float | None = None,
+    latency_ms: dict | None = None,
 ) -> bool:
     cid = str(camera_id or "").strip()
     if not cid:
         return False
+    bench = bool(str(run_id or os.environ.get("INFERENCE_RUN_ID", "")).strip())
+    effective_run_id = str(run_id or os.environ.get("INFERENCE_RUN_ID", "")).strip()
+    effective_mode = "file" if bench else str(source_mode or "stream")
     frame = build_pose_frame(
         camera_id=cid,
         frame_idx=frame_idx,
         persons=persons,
         infer_width=infer_width,
         infer_height=infer_height,
+        source_mode=effective_mode,
+        run_id=effective_run_id,
+        video_time_sec=video_time_sec,
+        video_fps=video_fps,
+        latency_ms=latency_ms,
     )
     payload = json.dumps(frame, ensure_ascii=False, separators=(",", ":"))
+    skip_live = bench or is_benchmark_pose(frame)
     try:
         client = sync_redis.from_url(redis_url(), decode_responses=True)
         pipe = client.pipeline(transaction=False)
@@ -105,8 +138,9 @@ def publish_pose_frame(
                 maxlen=POSE_STREAM_MAXLEN,
                 approximate=True,
             )
-        pipe.set(snapshot_key_for(cid), payload, ex=SNAPSHOT_TTL_SEC)
-        pipe.publish(channel_for(cid), payload)
+        if not skip_live:
+            pipe.set(snapshot_key_for(cid), payload, ex=SNAPSHOT_TTL_SEC)
+            pipe.publish(channel_for(cid), payload)
         pipe.execute()
         client.close()
         return True

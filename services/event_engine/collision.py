@@ -77,7 +77,16 @@ class CollisionProcessor:
     def process(self, pose_frame: dict) -> dict:
         """返回 collisions、alarm_collisions、带 track 的 skeletons（供 SSE 合并）。"""
         frame_idx = int(pose_frame.get("frame_idx") or 0)
-        now_ts = frame_idx / self.video_fps if self.video_fps > 0 else 0.0
+        vts = pose_frame.get("video_time_sec")
+        if vts is not None:
+            try:
+                now_ts = float(vts)
+            except (TypeError, ValueError):
+                fps = float(pose_frame.get("video_fps") or self.video_fps)
+                now_ts = (frame_idx - 1) / fps if frame_idx > 0 and fps > 0 else 0.0
+        else:
+            fps = float(pose_frame.get("video_fps") or self.video_fps)
+            now_ts = (frame_idx - 1) / fps if frame_idx > 0 and fps > 0 else 0.0
         persons = pose_frame.get("persons") or pose_frame.get("skeletons") or []
 
         active_collisions: list[str] = []

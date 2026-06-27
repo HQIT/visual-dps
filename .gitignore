@@ -16,6 +16,7 @@ localdata/json/cameras/
 localdata/upload_counter.txt
 localdata/json/annotation_*.json
 localdata/json/*_boxes.json
+localdata/benchmark/
 docker-compose.override.yml
 *.mp4
 *.avi

@@ -11,12 +11,14 @@ from services.admin_routes import register_admin_routes
 from services.auth_routes import register_auth_routes
 from services.auth_service import ensure_users_file
 from services.log_store import init_log_db
+from services.benchmark_store import init_benchmark_db
 from services.annotation_service import flatten_annotation_boxes, load_annotation, save_annotation
 from services.camera_routes import register_camera_routes
 from services.camera_store import load_cameras
 from services.live_bus import live_hub
 from services.mediamtx_service import ensure_mediamtx_config
 from services.version_routes import register_version_routes
+from services.benchmark_routes import register_benchmark_routes
 
 app = FastAPI(title="visual-dps-dev")
 api_router = APIRouter(prefix="/api")
@@ -24,6 +26,7 @@ api_router = APIRouter(prefix="/api")
 AUTH_SETTINGS = load_auth_settings(None)
 register_auth_routes(api_router, None)
 register_version_routes(api_router)
+register_benchmark_routes(api_router, None)
 register_admin_routes(api_router, None)
 app.add_middleware(AuthMiddleware, lambda: AUTH_SETTINGS)
 
@@ -31,6 +34,7 @@ app.add_middleware(AuthMiddleware, lambda: AUTH_SETTINGS)
 @app.on_event("startup")
 async def auth_startup():
     init_log_db()
+    init_benchmark_db()
     if AUTH_SETTINGS["enabled"] and AUTH_SETTINGS["local"]["enabled"]:
         ensure_users_file(AUTH_SETTINGS["local"]["users_file"])
     mtx_fix = ensure_mediamtx_config(

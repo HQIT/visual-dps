@@ -1,3 +1,23 @@
+.monitor-stage.is-overlay-only {
+  display: block;
+  height: 100%;
+}
+
+.monitor-stage.is-compact-preview {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.monitor-stage.is-compact-preview .monitor-stage-viewport {
+  min-height: min(52vh, 520px);
+  background: #0a1014;
+  border: 1px solid #2b3a45;
+  border-radius: 10px;
+}
+
+.monitor-stage.is-compact-preview .monitor-media-fit {
+  min-height: min(48vh, 480px);
+}
+
 .monitor-stage {
   position: relative;
   display: grid;

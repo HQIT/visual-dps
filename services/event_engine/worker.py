@@ -21,9 +21,11 @@ from services.pose_bus import (
     POSE_STREAM_KEY,
     default_consumer_name,
     ensure_pose_stream_group,
+    is_benchmark_pose,
     pose_delivery_mode,
     redis_url,
 )
+from services.video_time import format_video_time, resolve_video_time
 
 logger = logging.getLogger(__name__)
 
@@ -40,12 +42,14 @@ class _CameraContext:
         processor: CollisionProcessor | None = None,
         infer_w: int = 0,
         infer_h: int = 0,
+        bench_started_at: float | None = None,
     ):
         self.json_path = json_path
         self.json_mtime = json_mtime
         self.processor = processor
         self.infer_w = infer_w
         self.infer_h = infer_h
+        self.bench_started_at = bench_started_at
 
 
 class EventRedisWorker:
@@ -81,56 +85,91 @@ class EventRedisWorker:
             return os.path.abspath(rel)
         return rel
 
-    def _get_processor(self, camera_id: str, infer_w: int, infer_h: int) -> CollisionProcessor | None:
-        json_path = self._resolve_json_path(camera_id)
-        ctx = self._contexts.get(camera_id)
-        mtime = os.path.getmtime(json_path) if os.path.isfile(json_path) else 0.0
+    def _get_processor(
+        self,
+        camera_id: str,
+        infer_w: int,
+        infer_h: int,
+        json_path: str = "",
+        context_key: str = "",
+    ) -> CollisionProcessor | None:
+        cache_key = context_key or camera_id
+        if json_path and os.path.isfile(json_path):
+            resolved_json = json_path
+        else:
+            resolved_json = self._resolve_json_path(camera_id)
+        ctx = self._contexts.get(cache_key)
+        mtime = os.path.getmtime(resolved_json) if os.path.isfile(resolved_json) else 0.0
+        bench_started_at: float | None = None
+        video_fps = self._video_fps
+        if json_path and context_key.startswith("bench:"):
+            from services.benchmark_store import get_run
+
+            run_row = get_run(context_key[6:])
+            if run_row:
+                if float(run_row.get("video_fps") or 0) > 0:
+                    video_fps = float(run_row["video_fps"])
+                started = run_row.get("started_at")
+                if started:
+                    bench_started_at = float(started)
+
+        if ctx and context_key.startswith("bench:") and bench_started_at:
+            if ctx.bench_started_at != bench_started_at:
+                self._contexts.pop(cache_key, None)
+                ctx = None
 
         if (
             ctx is None
-            or ctx.json_path != json_path
+            or ctx.json_path != resolved_json
             or ctx.json_mtime != mtime
             or ctx.infer_w != infer_w
             or ctx.infer_h != infer_h
         ):
-            boxes = load_scaled_boxes(json_path, infer_w, infer_h) if infer_w > 0 and infer_h > 0 else []
+            boxes = load_scaled_boxes(resolved_json, infer_w, infer_h) if infer_w > 0 and infer_h > 0 else []
             if not boxes:
-                logger.warning("event worker: no boxes for camera=%s path=%s", camera_id, json_path)
+                logger.warning("event worker: no boxes for camera=%s path=%s", camera_id, resolved_json)
             processor = CollisionProcessor(
                 boxes,
                 alarm_min_consecutive_frames=self._alarm_min,
                 alarm_cooldown_frames=self._alarm_cooldown,
-                video_fps=self._video_fps,
+                video_fps=video_fps,
             )
             ctx = _CameraContext(
-                json_path=json_path,
+                json_path=resolved_json,
                 json_mtime=mtime,
                 processor=processor,
                 infer_w=infer_w,
                 infer_h=infer_h,
+                bench_started_at=bench_started_at,
             )
-            self._contexts[camera_id] = ctx
+            self._contexts[cache_key] = ctx
 
         return ctx.processor
 
     def _log_collisions(
         self,
-        camera_id: str,
-        frame_idx: int,
+        pose: dict,
         collisions: list,
         alarm_collisions: list,
     ) -> None:
         if not _collision_log_enabled():
             return
+        camera_id = str(pose.get("camera_id") or "")
+        frame_idx = int(pose.get("frame_idx") or 0)
+        run_id = str(pose.get("run_id") or "")
+        vsec, vtext = resolve_video_time(pose, self._video_fps)
+        src = pose.get("source_mode") or "stream"
+        lat = pose.get("latency_ms") or {}
+        prefix = f"[COLLISION][HIT] camera={camera_id} source={src}"
+        if run_id:
+            prefix += f" run_id={run_id}"
+        prefix += f" video_time={vtext} video_sec={vsec:.3f} frame={frame_idx}"
         if collisions:
-            print(
-                f"[COLLISION][HIT] camera={camera_id} frame={frame_idx} hits={collisions}",
-                flush=True,
-            )
+            print(f"{prefix} hits={collisions} latency_ms={lat}", flush=True)
         if alarm_collisions:
             print(
-                f"[COLLISION][ALARM] camera={camera_id} frame={frame_idx} "
-                f"alarms={alarm_collisions} hits={collisions}",
+                f"{prefix.replace('[HIT]', '[ALARM]')} alarms={alarm_collisions} "
+                f"hits={collisions} latency_ms={lat}",
                 flush=True,
             )
 
@@ -260,7 +299,21 @@ class EventRedisWorker:
 
         infer_w = int(pose.get("infer_width") or 0)
         infer_h = int(pose.get("infer_height") or 0)
-        processor = self._get_processor(camera_id, infer_w, infer_h)
+        run_id = str(pose.get("run_id") or "").strip()
+        bench_json = ""
+        if run_id:
+            from services.benchmark_store import get_run
+
+            run_row = get_run(run_id)
+            if run_row:
+                bench_json = str(run_row.get("annotation_path") or "")
+        processor = self._get_processor(
+            camera_id,
+            infer_w,
+            infer_h,
+            json_path=bench_json,
+            context_key=f"bench:{run_id}" if run_id else camera_id,
+        )
         if processor is None:
             return
 
@@ -269,8 +322,55 @@ class EventRedisWorker:
         collisions = result.get("collisions") or []
         alarm_collisions = result.get("alarm_collisions") or []
         skeletons = result.get("skeletons")
+        vsec, vtext = resolve_video_time(pose, self._video_fps)
+        bench = bool(run_id) or is_benchmark_pose(pose)
 
-        self._log_collisions(camera_id, frame_idx, collisions, alarm_collisions)
+        self._log_collisions(pose, collisions, alarm_collisions)
+
+        if bench and run_id:
+            from services.benchmark_store import save_alarm, save_pose_frame
+            from services.event_service import record_event
+
+            latency_ms = pose.get("latency_ms") if isinstance(pose.get("latency_ms"), dict) else {}
+            await asyncio.to_thread(
+                save_pose_frame,
+                run_id,
+                frame_idx=frame_idx,
+                video_time_sec=vsec,
+                infer_width=infer_w,
+                infer_height=infer_h,
+                persons=skeletons or pose.get("persons") or [],
+                collisions=collisions,
+                alarm_collisions=alarm_collisions,
+                latency_ms=latency_ms,
+            )
+            if alarm_collisions:
+                await asyncio.to_thread(
+                    save_alarm,
+                    run_id,
+                    frame_idx=frame_idx,
+                    video_time_sec=vsec,
+                    hits=collisions,
+                    alarms=alarm_collisions,
+                    detail={"video_time": vtext, "latency_ms": latency_ms},
+                )
+                await asyncio.to_thread(
+                    record_event,
+                    "collision.alarm",
+                    camera_id=camera_id,
+                    severity="warning",
+                    summary=f"{vtext} {alarm_collisions}",
+                    detail={
+                        "run_id": run_id,
+                        "source_mode": pose.get("source_mode"),
+                        "video_time_sec": vsec,
+                        "video_time": vtext,
+                        "frame_idx": frame_idx,
+                        "alarms": alarm_collisions,
+                        "hits": collisions,
+                    },
+                )
+            return
 
         await asyncio.to_thread(
             publish_event_frame,
@@ -283,7 +383,6 @@ class EventRedisWorker:
 
         if self.callback_reporter and alarm_collisions:
             upload_tag = f"infer_{camera_id}"
-            video_time_sec = frame_idx / self._video_fps
             for collision in alarm_collisions:
                 shelf_code, box_id = parse_collision_token(collision)
                 if not box_id:
@@ -291,7 +390,7 @@ class EventRedisWorker:
                 self.callback_reporter.enqueue_pick_finished(
                     box_id=box_id,
                     frame_idx=frame_idx,
-                    video_time_sec=video_time_sec,
+                    video_time_sec=vsec,
                     upload_tag=upload_tag,
                     shelf_code=shelf_code or None,
                 )

@@ -105,8 +105,9 @@ def write_status(base_dir: str, camera_id: str, state: str, message: str = "", e
 
 async def _run_worker():
     camera_id = os.environ.get("INFERENCE_CAMERA_ID", "").strip()
-    stream_url = normalize_rtsp_url(os.environ.get("INFERENCE_STREAM_URL", "").strip())
-    if not camera_id or not stream_url:
+    source_type = os.environ.get("INFERENCE_SOURCE_TYPE", "stream").strip().lower() or "stream"
+    media_url = os.environ.get("INFERENCE_STREAM_URL", "").strip()
+    if not camera_id or not media_url:
         raise SystemExit("INFERENCE_CAMERA_ID and INFERENCE_STREAM_URL are required")
 
     app_config = load_app_config()
@@ -115,9 +116,15 @@ async def _run_worker():
     base_dir = app_config["paths"]["base_localdata_dir"]
     json_path = os.environ.get("INFERENCE_JSON_PATH", "").strip() or app_config["paths"]["default_json_file"]
 
-    STATE.source_type = "stream"
-    STATE.video_path = stream_url
-    STATE.source_url = stream_url
+    if source_type == "file":
+        STATE.source_type = "file"
+        STATE.video_path = media_url
+        STATE.source_url = ""
+    else:
+        stream_url = normalize_rtsp_url(media_url)
+        STATE.source_type = "stream"
+        STATE.video_path = stream_url
+        STATE.source_url = stream_url
     STATE.json_path = json_path
     STATE.is_inferencing = False
     STATE.upload_id = 0
@@ -128,7 +135,7 @@ async def _run_worker():
         camera_id,
         "starting",
         f"正在加载模型（{backend}）…",
-        {"stream_url": stream_url, "json_path": json_path, "backend": backend},
+        {"stream_url": media_url, "json_path": json_path, "backend": backend, "source_type": source_type},
     )
 
     service = InferenceService(app_config, STATE)
@@ -151,7 +158,7 @@ async def _run_worker():
         camera_id,
         "running",
         f"推理已启动 ({result.get('mode', '')})",
-        {"stream_url": stream_url, "started_at": time.time()},
+        {"stream_url": media_url, "started_at": time.time()},
     )
 
     while not stopping:
@@ -168,7 +175,7 @@ async def _run_worker():
             camera_id,
             "running",
             "",
-            {"stream_url": stream_url, "is_inferencing": STATE.is_inferencing},
+            {"stream_url": media_url, "is_inferencing": STATE.is_inferencing},
         )
         await asyncio.sleep(3)
 

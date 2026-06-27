@@ -10,6 +10,8 @@ import LoginPage from './pages/LoginPage';
 import SettingsPage from './pages/SettingsPage';
 import MatrixPage from './pages/MatrixPage';
 import TopologyPage from './pages/TopologyPage';
+import BenchPage from './pages/BenchPage';
+import BenchReplayPage from './pages/BenchReplayPage';
 
 export default function App() {
   return (
@@ -28,6 +30,8 @@ export default function App() {
           <Route path="/matrix" element={<MatrixPage />} />
           <Route path="/topology" element={<TopologyPage />} />
           <Route path="/monitor" element={<MonitorPage />} />
+          <Route path="/bench" element={<BenchPage />} />
+          <Route path="/bench/:runId" element={<BenchReplayPage />} />
         <Route path="/annotate" element={<AnnotatePage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>

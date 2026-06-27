@@ -224,6 +224,13 @@ export default function MonitorPreviewStage({
   annotatePanel = null,
   shelfBar = null,
   onFrameSize = null,
+  overlayOnly = false,
+  compactPreview = false,
+  filePreviewUrl = '',
+  filePreviewPlayback = false,
+  onVideoElement = null,
+  forcedFrameWidth = 0,
+  forcedFrameHeight = 0,
 }) {
   const stageRef = useRef(null);
   const imgRef = useRef(null);
@@ -248,9 +255,10 @@ export default function MonitorPreviewStage({
   }, [cameraId, playback]);
 
   const { format, height } = streamPrefs;
+  const filePreviewMode = Boolean(filePreviewUrl);
   const mjpegSrc = cameraId && format === 'mjpeg' ? cameraStreamUrl(cameraId, height) : '';
-  const showVideo = format === 'hls' || format === 'webrtc';
-  const hasMedia = showVideo || mjpegSrc || imageSrc;
+  const showVideo = (format === 'hls' || format === 'webrtc') && !filePreviewMode;
+  const hasMedia = overlayOnly || filePreviewMode || showVideo || mjpegSrc || imageSrc;
 
   const { streamError } = usePreviewStream({
     format,
@@ -258,7 +266,7 @@ export default function MonitorPreviewStage({
     mjpegSrc,
     videoRef,
     imgRef,
-    enabled: Boolean(cameraId || imageSrc),
+    enabled: Boolean((cameraId || imageSrc) && !filePreviewMode),
   });
 
   const hitSet = useMemo(() => new Set(hits), [hits]);
@@ -266,16 +274,19 @@ export default function MonitorPreviewStage({
 
   const updateLayout = useCallback(() => {
     const stage = stageRef.current;
-    const el = showVideo ? videoRef.current : imgRef.current;
-    if (!stage || !el) return;
-
-    const nw = el.videoWidth || el.naturalWidth || 0;
-    const nh = el.videoHeight || el.naturalHeight || 0;
-    if (!nw) return;
-
-    // 布局始终按当前画面实际分辨率；标注坐标经 annotationSize 换算到画面再映射到 viewport
-    const fw = nw;
-    const fh = nh;
+    const el = showVideo || filePreviewMode ? videoRef.current : imgRef.current;
+    let fw = 0;
+    let fh = 0;
+    if (overlayOnly && forcedFrameWidth > 0 && forcedFrameHeight > 0) {
+      fw = forcedFrameWidth;
+      fh = forcedFrameHeight;
+    } else {
+      if (!stage || !el) return;
+      fw = el.videoWidth || el.naturalWidth || 0;
+      fh = el.videoHeight || el.naturalHeight || 0;
+      if (!fw) return;
+    }
+    if (!stage) return;
     setFrameSize({ w: fw, h: fh });
     const nextLayout = computeContainLayout(stage.clientWidth, stage.clientHeight, fw, fh);
     setLayout((prev) => {
@@ -301,7 +312,7 @@ export default function MonitorPreviewStage({
         onFrameSize({ width: notifyW, height: notifyH });
       }
     }
-  }, [annotationSize, annotateMode, onFrameSize, showVideo]);
+  }, [annotationSize, annotateMode, onFrameSize, showVideo, filePreviewMode, overlayOnly, forcedFrameWidth, forcedFrameHeight]);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -315,20 +326,44 @@ export default function MonitorPreviewStage({
 
   useEffect(() => {
     updateLayout();
-  }, [mjpegSrc, format, imageSrc, annotateMode, updateLayout]);
+  }, [mjpegSrc, format, imageSrc, filePreviewUrl, annotateMode, updateLayout, overlayOnly, forcedFrameWidth, forcedFrameHeight]);
 
   useEffect(() => {
-    if (!showVideo) return undefined;
+    if (!filePreviewMode || filePreviewPlayback) return undefined;
+    const video = videoRef.current;
+    if (!video) return undefined;
+    try {
+      video.pause();
+      video.currentTime = 0;
+    } catch {
+      /* ignore */
+    }
+    updateLayout();
+    return undefined;
+  }, [filePreviewUrl, filePreviewMode, filePreviewPlayback, updateLayout]);
+
+  useEffect(() => {
+    if (!onVideoElement) return undefined;
+    onVideoElement(videoRef.current);
+    return () => onVideoElement(null);
+  }, [onVideoElement, filePreviewUrl, filePreviewPlayback, layout]);
+
+  useEffect(() => {
+    if (!showVideo && !filePreviewMode) return undefined;
     const video = videoRef.current;
     if (!video) return undefined;
     const onResize = () => updateLayout();
     video.addEventListener('resize', onResize);
+    video.addEventListener('loadeddata', onResize);
+    video.addEventListener('loadedmetadata', onResize);
     const tick = setInterval(updateLayout, 500);
     return () => {
       video.removeEventListener('resize', onResize);
+      video.removeEventListener('loadeddata', onResize);
+      video.removeEventListener('loadedmetadata', onResize);
       clearInterval(tick);
     };
-  }, [showVideo, updateLayout]);
+  }, [showVideo, filePreviewMode, updateLayout, filePreviewUrl]);
 
   useEffect(() => {
     if (format !== 'mjpeg' || showVideo) return undefined;
@@ -461,11 +496,13 @@ export default function MonitorPreviewStage({
     />
   );
 
+  const hideSidePanel = overlayOnly || compactPreview;
+
   return (
-    <div className="monitor-stage">
+    <div className={`monitor-stage${overlayOnly ? ' is-overlay-only' : ''}${compactPreview ? ' is-compact-preview' : ''}`}>
       <div className="monitor-stage-main">
         <div className={`monitor-stage-viewport${busy && !hasMedia ? ' is-busy' : ''}`} ref={stageRef}>
-        {cameraId ? (
+        {cameraId && !overlayOnly ? (
           <div className="monitor-stream-bar" role="group" aria-label="实时预览设置">
             <select
               className="monitor-stream-select"
@@ -508,19 +545,22 @@ export default function MonitorPreviewStage({
               >
                 <video
                   ref={videoRef}
-                  className={`monitor-stage-media-fit${showVideo ? '' : ' is-hidden'}`}
-                  autoPlay
-                  muted
+                  src={filePreviewMode ? filePreviewUrl : undefined}
+                  className={`monitor-stage-media-fit${showVideo || filePreviewMode ? '' : ' is-hidden'}`}
+                  autoPlay={!filePreviewMode}
+                  muted={!filePreviewPlayback}
                   playsInline
+                  controls={filePreviewPlayback}
+                  preload={filePreviewMode ? 'auto' : undefined}
                   onLoadedMetadata={updateLayout}
                   onLoadedData={updateLayout}
                   onPlaying={updateLayout}
                 />
                 <img
                   ref={imgRef}
-                  src={imageSrc || undefined}
+                  src={filePreviewMode ? undefined : (imageSrc || undefined)}
                   alt=""
-                  className={`monitor-stage-media-fit${showVideo ? ' is-hidden' : ''}`}
+                  className={`monitor-stage-media-fit${showVideo || filePreviewMode ? ' is-hidden' : ''}`}
                   onLoad={updateLayout}
                 />
                 {annotateMode && annotateCanvasRef ? (
@@ -611,6 +651,7 @@ export default function MonitorPreviewStage({
         {shelfBar ? <div className="monitor-stage-shelf-slot">{shelfBar}</div> : null}
       </div>
 
+      {!hideSidePanel ? (
       <aside
         id="monitor-side-panel"
         className="monitor-side-panel"
@@ -624,6 +665,7 @@ export default function MonitorPreviewStage({
         </header>
         <div className="monitor-panel-drawer-body">{panelBody}</div>
       </aside>
+      ) : null}
     </div>
   );
 }

@@ -12,6 +12,9 @@ from services.event_engine.worker import EventRedisWorker
 
 async def _run():
     app_config = load_app_config()
+    from services.benchmark_store import init_benchmark_db
+
+    init_benchmark_db()
     reporter = CollisionCallbackReporter(app_config.get("reporting", {}))
     await reporter.start()
 

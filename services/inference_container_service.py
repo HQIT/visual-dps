@@ -14,7 +14,8 @@ from services.inference_backends.model_registry import (
 )
 
 _LITE_BACKENDS = LITE_BACKEND_FAMILIES
-from services.annotation_service import ensure_camera_annotation_file
+from services.annotation_service import camera_annotation_path, ensure_camera_annotation_file
+from services.nvidia_pip_cuda import nvidia_pip_lib_path
 from services.runtime_config_service import get_effective_settings
 
 INFERENCE_CONTAINER_PREFIX = os.environ.get("INFERENCE_CONTAINER_PREFIX", "visual-dps-infer-")
@@ -28,6 +29,13 @@ INFERENCE_JSON_PATH = os.environ.get(
     "localdata/json/precise_boxes_new.json",
 )
 INFERENCE_STATUS_DIR = os.environ.get("INFERENCE_STATUS_DIR", "localdata/inference")
+
+# infer 容器内 pip nvidia 库（ORT cuDNN 9）；UI 侧用固定路径推断
+_INFER_GPU_RUNTIME_BINDS = (
+    "inference_worker.py",
+    "services/nvidia_pip_cuda.py",
+    "services/inference_backends/rtmpose_onnx_backend.py",
+)
 
 
 def resolve_inference_json_rel(camera_id: str, json_dir: str = "localdata/json") -> str:
@@ -46,13 +54,53 @@ def resolve_inference_json_rel(camera_id: str, json_dir: str = "localdata/json")
     return cam_rel
 
 
+def _import_docker_sdk():
+    """加载 PyPI docker 包；避免宿主机 `docker/` 开发目录遮蔽。"""
+    import importlib.util
+    import site
+    import sys
+
+    for key in list(sys.modules):
+        if key == "docker" or key.startswith("docker."):
+            del sys.modules[key]
+
+    for sp in site.getsitepackages() + [site.getusersitepackages()]:
+        if not sp:
+            continue
+        init_py = os.path.join(sp, "docker", "__init__.py")
+        if not os.path.isfile(init_py):
+            continue
+        pkg_root = os.path.join(sp, "docker")
+        spec = importlib.util.spec_from_file_location(
+            "docker",
+            init_py,
+            submodule_search_locations=[pkg_root],
+        )
+        if spec is None or spec.loader is None:
+            continue
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["docker"] = mod
+        spec.loader.exec_module(mod)
+        if hasattr(mod, "from_env"):
+            return mod
+    raise ImportError("未找到 PyPI docker 包（pip install docker）")
+
+
+_docker_sdk = None
+
+
+def _docker_module():
+    global _docker_sdk
+    if _docker_sdk is None:
+        _docker_sdk = _import_docker_sdk()
+    return _docker_sdk
+
+
 def _docker_client():
     try:
-        import docker
+        return _docker_module().from_env()
     except ImportError as exc:
         raise RuntimeError("未安装 docker SDK，无法管理推理容器") from exc
-    try:
-        return docker.from_env()
     except Exception as exc:
         raise RuntimeError(f"无法连接 Docker: {exc}") from exc
 
@@ -211,7 +259,7 @@ def _host_bind(rel_path: str, container_subpath: str | None = None, read_only: b
 
 
 def _image_exists(client, image: str) -> bool:
-    import docker
+    docker = _docker_module()
 
     if not str(image or "").strip():
         return False
@@ -224,7 +272,7 @@ def _image_exists(client, image: str) -> bool:
 
 def _first_local_image(client, repo: str) -> str:
     """本地已构建镜像任选一 tag（优先非 latest 的 dated tag）。"""
-    import docker
+    docker = _docker_module()
 
     repo = str(repo or "").strip()
     if not repo:
@@ -289,7 +337,7 @@ def _stream_url_for_container(url: str) -> str:
 
 
 def start_inference_container(camera: dict, request=None) -> dict:
-    import docker
+    docker = _docker_module()
 
     camera_id = str(camera.get("id") or camera.get("path") or "").strip()
     if not camera_id:
@@ -324,16 +372,20 @@ def start_inference_container(camera: dict, request=None) -> dict:
         _host_bind("localdata"),
         _host_bind("app_config.json", read_only=True),
     ]
-    config_host = os.path.join(HOST_PROJECT_ROOT, "core", "config.py")
-    if os.path.isfile(config_host):
+    # 须在宿主机挂载（UI 在容器内时 isfile 仅查宿主机路径）
+    if HOST_PROJECT_ROOT:
         binds.append(_host_bind("core/config.py", read_only=True))
+        for rel in _INFER_GPU_RUNTIME_BINDS:
+            host_path = os.path.join(HOST_PROJECT_ROOT, rel)
+            if os.path.isfile(host_path):
+                binds.append(_host_bind(rel, read_only=True))
     effective = get_effective_settings(app_config, camera)
     preset = resolve_model_preset(app_config, overrides=effective)
     infer_image, _family = _resolve_inference_image(client, preset.family)
     use_gpu = os.environ.get("INFERENCE_USE_GPU", "0") == "1"
     rtsp_backend = os.environ.get("INFERENCE_RTSP_CAPTURE_BACKEND", "").strip()
     if not rtsp_backend:
-        # 有 GPU 时用 auto（ffmpeg CUDA）；无 GPU 用 opencv，避免容器内 qsv 假阳性
+        # auto：有 NVDEC 时用 ffmpeg CUDA，否则探测回退 opencv
         rtsp_backend = "auto" if use_gpu else "opencv"
     env = {
         "INFERENCE_CAMERA_ID": camera_id,
@@ -354,6 +406,8 @@ def start_inference_container(camera: dict, request=None) -> dict:
         "POSE_STREAM_GROUP": os.environ.get("POSE_STREAM_GROUP", "event-workers"),
         "POSE_STREAM_MAXLEN": os.environ.get("POSE_STREAM_MAXLEN", "2000"),
     }
+    if use_gpu:
+        env["LD_LIBRARY_PATH"] = nvidia_pip_lib_path(include_existing=False)
     redis_url = os.environ.get("REDIS_URL", "").strip()
     if redis_url:
         env["REDIS_URL"] = redis_url
@@ -363,8 +417,6 @@ def start_inference_container(camera: dict, request=None) -> dict:
         env["REDIS_PASSWORD"] = os.environ["REDIS_PASSWORD"]
         env["REDIS_HOST"] = redis_host
         env["REDIS_PORT"] = redis_port
-
-    import docker
 
     device_requests = []
     if use_gpu:
@@ -435,7 +487,7 @@ def start_inference_container(camera: dict, request=None) -> dict:
                 "message": "正在启动",
                 "updated_at": time.time(),
                 "stream_url": stream_url,
-                "backend": preset.family,
+                "backend": preset.id,
             },
             f,
             ensure_ascii=False,
@@ -459,7 +511,7 @@ def start_inference_container(camera: dict, request=None) -> dict:
 
 
 def stop_inference_container(camera_id: str, request=None) -> dict:
-    import docker
+    docker = _docker_module()
 
     name = container_name(camera_id)
     client = _docker_client()

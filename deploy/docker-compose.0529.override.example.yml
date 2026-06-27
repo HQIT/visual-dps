@@ -1,0 +1,21 @@
+# 153 第二实例：与现网 visual-dps-* 错开端口时使用
+# docker compose -p visual-dps-0529 -f docker-compose.deploy.yml -f docker-compose.0529.override.yml up -d
+
+services:
+  redis:
+    container_name: visual-dps-0529-redis
+  mediamtx:
+    container_name: visual-dps-0529-mediamtx
+  visual-dps-ui:
+    container_name: visual-dps-0529-ui
+    volumes:
+      # 界面启停推理时读取最新逻辑（GPU/cuDNN LD 注入与运行时挂载）
+      - ./services/inference_container_service.py:/app/services/inference_container_service.py:ro
+      - ./services/nvidia_pip_cuda.py:/app/services/nvidia_pip_cuda.py:ro
+  visual-dps-event-worker:
+    container_name: visual-dps-0529-event-worker
+
+networks:
+  visual-dps-internal:
+    name: visual-dps-0529-internal
+    external: true

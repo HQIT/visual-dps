@@ -1,8 +1,31 @@
 """单路摄像头推理 Worker（独立 Docker 容器入口）。"""
 
+import os
+
+
+def _preload_cuda_dlls_early() -> None:
+    """GPU 容器：预加载 cuDNN 供 ORT；LD_LIBRARY_PATH 由 docker run 注入。"""
+    if os.environ.get("INFERENCE_USE_GPU", "").strip().lower() not in ("1", "true", "yes"):
+        return
+    try:
+        from services.nvidia_pip_cuda import preload_cudnn_libs
+
+        preload_cudnn_libs()
+        import onnxruntime as ort
+
+        if hasattr(ort, "preload_dlls"):
+            try:
+                ort.preload_dlls(cuda=True, cudnn=True)
+            except TypeError:
+                ort.preload_dlls()
+    except Exception:
+        pass
+
+
+_preload_cuda_dlls_early()
+
 import asyncio
 import json
-import os
 import signal
 import time
 

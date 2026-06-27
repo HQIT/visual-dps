@@ -9,7 +9,7 @@ import {
   filterFrameEventGroups,
 } from '../lib/benchEvents';
 import { formatUserError } from '../lib/userFacingText';
-import { findFrameAtPlaybackTime, resolveFramePlaybackSec } from '../lib/benchTime';
+import { findFrameAtPlaybackTime, findFrameByIdx, resolveFramePlaybackSec, seekSecForFrame } from '../lib/benchTime';
 import './BenchPage.css';
 
 function formatTime(sec) {
@@ -24,6 +24,7 @@ function formatTime(sec) {
 export default function BenchReplayPage() {
   const { runId } = useParams();
   const videoRef = useRef(null);
+  const pinSeekRef = useRef(false);
   const [videoEl, setVideoEl] = useState(null);
   const [run, setRun] = useState(null);
   const [frames, setFrames] = useState([]);
@@ -40,6 +41,8 @@ export default function BenchReplayPage() {
   const [showRoiLayer, setShowRoiLayer] = useState(true);
   const [eventFilter, setEventFilter] = useState('all');
   const [rerunLoading, setRerunLoading] = useState(false);
+  /** 侧栏点击帧事件后锁定骨架，直到用户播放或拖动进度条 */
+  const [pinnedFrameIdx, setPinnedFrameIdx] = useState(null);
 
   const handleVideoElement = useCallback((el) => {
     videoRef.current = el;
@@ -97,6 +100,7 @@ export default function BenchReplayPage() {
     };
 
     const onPlay = () => {
+      setPinnedFrameIdx(null);
       cancelAnimationFrame(rafId);
       rafId = requestAnimationFrame(tick);
     };
@@ -104,7 +108,14 @@ export default function BenchReplayPage() {
       cancelAnimationFrame(rafId);
       setCurrentTime(video.currentTime);
     };
-    const onSeeked = () => setCurrentTime(video.currentTime);
+    const onSeeked = () => {
+      setCurrentTime(video.currentTime);
+      if (pinSeekRef.current) {
+        pinSeekRef.current = false;
+        return;
+      }
+      setPinnedFrameIdx(null);
+    };
 
     video.addEventListener('play', onPlay);
     video.addEventListener('pause', onPause);
@@ -132,10 +143,13 @@ export default function BenchReplayPage() {
     [eventGroups, eventFilter],
   );
 
-  const activeFrame = useMemo(
-    () => findFrameAtPlaybackTime(frames, currentTime, runFps),
-    [frames, currentTime, runFps],
-  );
+  const activeFrame = useMemo(() => {
+    if (pinnedFrameIdx != null) {
+      const pinned = findFrameByIdx(frames, pinnedFrameIdx);
+      if (pinned) return pinned;
+    }
+    return findFrameAtPlaybackTime(frames, currentTime, runFps);
+  }, [frames, currentTime, runFps, pinnedFrameIdx]);
   const activePlaybackSec = activeFrame
     ? resolveFramePlaybackSec(activeFrame, runFps)
     : null;
@@ -152,7 +166,25 @@ export default function BenchReplayPage() {
     [activeFrame],
   );
 
+  const seekToFrameIdx = useCallback((frameIdx) => {
+    const frame = findFrameByIdx(frames, frameIdx);
+    if (!frame) return;
+    const video = videoRef.current;
+    const seekSec = seekSecForFrame(frame, runFps);
+    setPinnedFrameIdx(Number(frameIdx));
+    pinSeekRef.current = true;
+    if (video) {
+      video.pause();
+      const max = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : seekSec;
+      video.currentTime = Math.min(Math.max(0, seekSec), max);
+      setCurrentTime(video.currentTime);
+    } else {
+      setCurrentTime(seekSec);
+    }
+  }, [frames, runFps]);
+
   const seekTo = (sec) => {
+    setPinnedFrameIdx(null);
     const video = videoRef.current;
     if (!video) return;
     video.currentTime = Math.max(0, Number(sec) || 0);
@@ -301,7 +333,7 @@ export default function BenchReplayPage() {
                   <button
                     type="button"
                     className={`bench-event-group-btn${isActive ? ' is-active' : ''}`}
-                    onClick={() => seekTo(group.video_time_sec)}
+                    onClick={() => seekToFrameIdx(group.frame_idx)}
                   >
                     <div className="bench-event-group-head">
                       <strong>{formatTime(group.video_time_sec)}</strong>

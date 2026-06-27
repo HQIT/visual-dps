@@ -25,18 +25,24 @@ export function buildFrameEventGroups(frames, fallbackFps = 25) {
     const events = [];
 
     for (const token of alarms) {
+      const { shelf_code, box_id } = parseCollisionToken(token);
       events.push({
         kind: 'alarm',
         token,
         boxLabel: formatCollisionBoxLabel(token),
+        boxId: box_id,
+        shelfCode: shelf_code,
       });
     }
     for (const token of hits) {
       if (alarmSet.has(token)) continue;
+      const { shelf_code, box_id } = parseCollisionToken(token);
       events.push({
         kind: 'collision',
         token,
         boxLabel: formatCollisionBoxLabel(token),
+        boxId: box_id,
+        shelfCode: shelf_code,
       });
     }
 
@@ -65,12 +71,52 @@ export function countFrameEvents(groups) {
   return { collisions, alarms, frames: (groups || []).length };
 }
 
-export function filterFrameEventGroups(groups, filter) {
-  if (filter === 'all') return groups;
-  return groups
+/** 事件是否匹配货框筛选（支持 token / box_id / 展示标签，含部分匹配） */
+export function eventMatchesBoxFilter(ev, boxFilter) {
+  const q = String(boxFilter || '').trim().toLowerCase();
+  if (!q) return true;
+  const token = String(ev?.token || '').toLowerCase();
+  const boxId = String(ev?.boxId || '').toLowerCase();
+  const boxLabel = String(ev?.boxLabel || '').toLowerCase();
+  if (token === q || boxId === q || boxLabel === q) return true;
+  return boxId.includes(q) || boxLabel.includes(q) || token.includes(q);
+}
+
+/** 从事件组提取去重后的货框选项（供下拉/联想输入） */
+export function collectEventBoxOptions(groups) {
+  const map = new Map();
+  for (const group of groups || []) {
+    for (const ev of group.events || []) {
+      const key = ev.token || ev.boxId || ev.boxLabel;
+      if (!key || map.has(key)) continue;
+      map.set(key, {
+        value: key,
+        label: ev.boxLabel || ev.boxId || key,
+        boxId: ev.boxId || '',
+      });
+    }
+  }
+  return [...map.values()].sort((a, b) => (
+    String(a.label).localeCompare(String(b.label), 'zh-CN', { numeric: true })
+  ));
+}
+
+export function filterFrameEventGroups(groups, filter, boxFilter = '') {
+  let result = groups;
+  if (filter !== 'all') {
+    result = result
+      .map((group) => ({
+        ...group,
+        events: group.events.filter((ev) => ev.kind === filter),
+      }))
+      .filter((group) => group.events.length > 0);
+  }
+  const boxQ = String(boxFilter || '').trim();
+  if (!boxQ) return result;
+  return result
     .map((group) => ({
       ...group,
-      events: group.events.filter((ev) => ev.kind === filter),
+      events: group.events.filter((ev) => eventMatchesBoxFilter(ev, boxQ)),
     }))
     .filter((group) => group.events.length > 0);
 }

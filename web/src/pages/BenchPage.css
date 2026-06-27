@@ -277,6 +277,48 @@
   color: #8fa3b5;
 }
 
+.bench-event-box-filter {
+  margin-top: 0.65rem;
+}
+
+.bench-event-box-filter label {
+  display: block;
+  font-size: 0.78rem;
+  color: #8fa3b5;
+  margin-bottom: 0.3rem;
+}
+
+.bench-event-box-filter-row {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.bench-event-box-search,
+.bench-event-box-select {
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.35rem 0.45rem;
+  border-radius: 6px;
+  border: 1px solid #2b3a45;
+  background: #0f161c;
+  color: #e8f0f6;
+}
+
+.bench-event-box-search {
+  flex: 1;
+  min-width: 0;
+}
+
+.bench-event-box-search::placeholder {
+  color: #6a7f90;
+}
+
+.bench-event-box-select {
+  flex-shrink: 0;
+  max-width: 42%;
+  cursor: pointer;
+}
+
 .bench-event-filters {
   display: flex;
   gap: 0.35rem;
@@ -406,6 +448,24 @@
   background: #0f161c;
   color: #e8f0f6;
   cursor: pointer;
+}
+
+.bench-export-btn {
+  font: inherit;
+  font-size: 0.84rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid #3a4f5f;
+  background: #0f161c;
+  color: #e8f0f6;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.bench-export-btn:hover {
+  border-color: #00d4aa;
+  color: #e8f0f6;
 }
 
 .bench-rerun-btn:hover:not(:disabled) {

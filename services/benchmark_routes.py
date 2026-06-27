@@ -12,7 +12,8 @@ from typing import Any
 
 import cv2
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
+from pydantic import BaseModel, Field
 
 from core.config import load_app_config
 from services.annotation_service import (
@@ -20,6 +21,7 @@ from services.annotation_service import (
     camera_annotation_path,
     load_camera_annotation,
 )
+from services.benchmark_export import render_event_export_csv, safe_export_filename
 from services.benchmark_store import (
     create_run,
     delete_run,
@@ -35,6 +37,68 @@ from services.benchmark_store import (
 from services.inference_backends.model_registry import normalize_backend_setting, resolve_model_preset
 from services.runtime_config_service import get_public_settings
 from services.video_service import get_first_frame_b64
+
+
+class BenchmarkRerunBody(BaseModel):
+    backend: str = Field("", max_length=64)
+    pose_frame_interval: int = Field(0, ge=0, le=120)
+    alarm_min_consecutive_frames: int = Field(0, ge=0, le=120)
+    alarm_cooldown_frames: int = Field(-1, ge=-1, le=600)
+
+
+def _default_alarm_settings(app_config: dict) -> tuple[int, int]:
+    items = get_public_settings(app_config).get("items") or {}
+    infer_cfg = app_config.get("inference", {}) or {}
+    if "inference.alarm_min_consecutive_frames" in items:
+        alarm_min = int(items["inference.alarm_min_consecutive_frames"])
+    else:
+        alarm_min = int(infer_cfg.get("alarm_min_consecutive_frames", 3) or 3)
+    if "inference.alarm_cooldown_frames" in items:
+        alarm_cooldown = int(items["inference.alarm_cooldown_frames"])
+    else:
+        raw = infer_cfg.get("alarm_cooldown_frames")
+        alarm_cooldown = int(raw if raw is not None else 0)
+    return max(1, alarm_min), max(0, alarm_cooldown)
+
+
+def _parse_alarm_params(
+    app_config: dict,
+    *,
+    alarm_min: int | None = None,
+    alarm_cooldown: int | None = None,
+) -> tuple[int, int]:
+    default_min, default_cooldown = _default_alarm_settings(app_config)
+    if alarm_min is not None and int(alarm_min) >= 1:
+        out_min = max(1, min(120, int(alarm_min)))
+    else:
+        out_min = default_min
+    if alarm_cooldown is not None and int(alarm_cooldown) >= 0:
+        out_cooldown = max(0, min(600, int(alarm_cooldown)))
+    else:
+        out_cooldown = default_cooldown
+    return out_min, out_cooldown
+
+
+def _run_config_snapshot(
+    app_config: dict,
+    pose_interval: int,
+    *,
+    alarm_min: int | None = None,
+    alarm_cooldown: int | None = None,
+) -> dict[str, Any]:
+    effective = _effective_inference_settings(app_config)
+    min_frames, cooldown_frames = _parse_alarm_params(
+        app_config,
+        alarm_min=alarm_min,
+        alarm_cooldown=alarm_cooldown,
+    )
+    return {
+        "inference.frame_rate": effective.get("frame_rate"),
+        "inference.height": effective.get("height"),
+        "inference.pose_frame_interval": pose_interval,
+        "inference.alarm_min_consecutive_frames": min_frames,
+        "inference.alarm_cooldown_frames": cooldown_frames,
+    }
 
 
 def _effective_inference_settings(app_config: dict) -> dict[str, Any]:
@@ -136,6 +200,22 @@ def register_benchmark_routes(router: APIRouter, app_config: dict | None = None)
             return {"status": "error", "error": "run 不存在"}
         return {"status": "success", "items": list_alarms(run_id)}
 
+    @router.get("/benchmark/runs/{run_id}/export")
+    async def benchmark_run_export(run_id: str):
+        init_benchmark_db()
+        run = get_run(run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="run 不存在")
+        frames = list_pose_frames(run_id)
+        fps = float(run.get("video_fps") or 25.0)
+        payload = render_event_export_csv(frames, fallback_fps=fps)
+        filename = safe_export_filename(str(run.get("title") or ""), run_id)
+        return StreamingResponse(
+            iter([payload]),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
     @router.get("/benchmark/runs/{run_id}/video")
     async def benchmark_run_video(run_id: str):
         init_benchmark_db()
@@ -215,6 +295,8 @@ def register_benchmark_routes(router: APIRouter, app_config: dict | None = None)
         title: str = Form(""),
         backend: str = Form(""),
         pose_frame_interval: int = Form(0),
+        alarm_min_consecutive_frames: int = Form(0),
+        alarm_cooldown_frames: int = Form(-1),
         start: bool = Form(True),
     ):
         init_benchmark_db()
@@ -263,6 +345,11 @@ def register_benchmark_routes(router: APIRouter, app_config: dict | None = None)
                     int(effective.get("pose_frame_interval") or infer_cfg.get("pose_frame_interval", 3) or 3),
                 )
 
+            alarm_min_raw = int(alarm_min_consecutive_frames or 0)
+            alarm_cooldown_raw = int(alarm_cooldown_frames if alarm_cooldown_frames is not None else -1)
+            alarm_min_arg = alarm_min_raw if alarm_min_raw >= 1 else None
+            alarm_cooldown_arg = alarm_cooldown_raw if alarm_cooldown_raw >= 0 else None
+
             run = create_run(
                 camera_id=cid,
                 title=title or (file.filename or f"bench-{cid}"),
@@ -275,11 +362,12 @@ def register_benchmark_routes(router: APIRouter, app_config: dict | None = None)
                 duration_sec=float(probe.get("duration_sec") or 0),
                 annotation_width=int((ann_size or {}).get("width") or 0),
                 annotation_height=int((ann_size or {}).get("height") or 0),
-                config={
-                    "inference.frame_rate": effective.get("frame_rate"),
-                    "inference.height": effective.get("height"),
-                    "inference.pose_frame_interval": pose_interval,
-                },
+                config=_run_config_snapshot(
+                    app_config,
+                    pose_interval,
+                    alarm_min=alarm_min_arg,
+                    alarm_cooldown=alarm_cooldown_arg,
+                ),
             )
         finally:
             try:
@@ -293,7 +381,7 @@ def register_benchmark_routes(router: APIRouter, app_config: dict | None = None)
         return {"status": "success", "run": run, "started": bool(start)}
 
     @router.post("/benchmark/runs/{run_id}/rerun")
-    async def benchmark_rerun_run(run_id: str):
+    async def benchmark_rerun_run(run_id: str, body: BenchmarkRerunBody | None = None):
         init_benchmark_db()
         run = get_run(run_id)
         if not run:
@@ -306,22 +394,51 @@ def register_benchmark_routes(router: APIRouter, app_config: dict | None = None)
             return {"status": "error", "error": "视频文件不存在，无法重跑"}
         if not ann_path or not os.path.isfile(ann_path):
             return {"status": "error", "error": "标注快照不存在，无法重跑"}
-        effective = _effective_inference_settings(app_config)
-        backend_id = str(effective.get("backend") or run.get("backend") or "").strip()
+
+        req = body or BenchmarkRerunBody()
+        backend_id = str(req.backend or run.get("backend") or "").strip()
+        if not backend_id:
+            effective = _effective_inference_settings(app_config)
+            backend_id = str(effective.get("backend") or "").strip()
         if backend_id:
             try:
                 backend_id = normalize_backend_setting(backend_id)
             except ValueError as exc:
                 return {"status": "error", "error": str(exc)}
-        pose_interval = max(1, int(effective.get("pose_frame_interval") or 1))
+
+        if int(req.pose_frame_interval or 0) > 0:
+            pose_interval = max(1, min(120, int(req.pose_frame_interval)))
+        else:
+            run_cfg = run.get("config") if isinstance(run.get("config"), dict) else {}
+            pose_interval = max(
+                1,
+                int(run_cfg.get("inference.pose_frame_interval") or 1),
+            )
+
+        run_cfg = run.get("config") if isinstance(run.get("config"), dict) else {}
+        if int(req.alarm_min_consecutive_frames or 0) >= 1:
+            alarm_min_arg = int(req.alarm_min_consecutive_frames)
+        elif run_cfg.get("inference.alarm_min_consecutive_frames") is not None:
+            alarm_min_arg = int(run_cfg["inference.alarm_min_consecutive_frames"])
+        else:
+            alarm_min_arg = None
+
+        if int(req.alarm_cooldown_frames) >= 0:
+            alarm_cooldown_arg = int(req.alarm_cooldown_frames)
+        elif run_cfg.get("inference.alarm_cooldown_frames") is not None:
+            alarm_cooldown_arg = int(run_cfg["inference.alarm_cooldown_frames"])
+        else:
+            alarm_cooldown_arg = None
+
         if not update_run_inference_params(
             run_id,
             backend=backend_id,
-            config={
-                "inference.frame_rate": effective.get("frame_rate"),
-                "inference.height": effective.get("height"),
-                "inference.pose_frame_interval": pose_interval,
-            },
+            config=_run_config_snapshot(
+                app_config,
+                pose_interval,
+                alarm_min=alarm_min_arg,
+                alarm_cooldown=alarm_cooldown_arg,
+            ),
         ):
             return {"status": "error", "error": "更新评测参数失败"}
         if not reset_run_for_rerun(run_id):
@@ -332,7 +449,7 @@ def register_benchmark_routes(router: APIRouter, app_config: dict | None = None)
             "status": "success",
             "run_id": run_id,
             "run": run,
-            "message": "已按当前参数重新启动评测",
+            "message": "已按指定参数重新启动评测",
         }
 
     @router.post("/benchmark/runs/{run_id}/start")

@@ -25,6 +25,22 @@ export const CAMERA_OVERRIDE_FIELDS = [
   { key: 'inference.height', label: '推理高度 (px)', type: 'number', min: 120, max: 2160 },
   { key: 'inference.pose_frame_interval', label: '姿态检测间隔 (帧)', type: 'number', min: 1, max: 120 },
   {
+    key: 'inference.alarm_min_consecutive_frames',
+    label: '告警连续碰撞帧数',
+    type: 'number',
+    min: 1,
+    max: 120,
+    hint: '同一货框连续 N 帧碰撞后才触发告警；调小可更快告警，调大可减少误报。',
+  },
+  {
+    key: 'inference.alarm_cooldown_frames',
+    label: '告警冷却帧数',
+    type: 'number',
+    min: 0,
+    max: 600,
+    hint: '同一货框两次告警之间的最小帧间隔；0 表示无冷却（每段连续碰撞均可告警）。修改后重跑评测或重启 event worker 生效。',
+  },
+  {
     key: 'debug-info.enabled',
     label: '推理调试日志',
     type: 'boolean',

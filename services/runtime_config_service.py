@@ -20,6 +20,8 @@ PUBLIC_KEYS = {
     "inference.frame_rate": ("inference", "frame_rate", int),
     "inference.height": ("inference", "height", int),
     "inference.pose_frame_interval": ("inference", "pose_frame_interval", int),
+    "inference.alarm_min_consecutive_frames": ("inference", "alarm_min_consecutive_frames", int),
+    "inference.alarm_cooldown_frames": ("inference", "alarm_cooldown_frames", int),
     "debug-info.enabled": ("debug-info", "enabled", bool),
 }
 
@@ -31,6 +33,8 @@ CAMERA_OVERRIDE_KEYS = {
         "inference.frame_rate",
         "inference.height",
         "inference.pose_frame_interval",
+        "inference.alarm_min_consecutive_frames",
+        "inference.alarm_cooldown_frames",
         "debug-info.enabled",
     )
 }
@@ -66,6 +70,21 @@ def _normalize_backend(raw: Any) -> str:
     return normalize_backend_setting(val)
 
 
+def _coerce_int_setting(pub_key: str, raw: Any) -> int:
+    val = int(raw)
+    if pub_key == "inference.alarm_cooldown_frames":
+        if val < 0:
+            raise ValueError("must be >= 0")
+        return val
+    if pub_key == "inference.alarm_min_consecutive_frames":
+        if val < 1:
+            raise ValueError("must be >= 1")
+        return val
+    if val <= 0:
+        raise ValueError("must be positive")
+    return val
+
+
 def _coerce_setting_value(pub_key: str, raw: Any, typ: type) -> Any:
     if pub_key == "models.backend":
         return _normalize_backend(raw)
@@ -76,10 +95,7 @@ def _coerce_setting_value(pub_key: str, raw: Any, typ: type) -> Any:
             return raw.lower() in ("1", "true", "yes", "on")
         return bool(raw)
     if typ is int:
-        val = int(raw)
-        if val <= 0:
-            raise ValueError("must be positive")
-        return val
+        return _coerce_int_setting(pub_key, raw)
     return str(raw).strip()
 
 
@@ -129,6 +145,12 @@ def get_public_settings(app_config: dict | None, path: str = DEFAULT_PATH) -> di
             "inference.frame_rate": _deep_get(merged, "inference", "frame_rate", 15),
             "inference.height": _deep_get(merged, "inference", "height", 480),
             "inference.pose_frame_interval": _deep_get(merged, "inference", "pose_frame_interval", 3),
+            "inference.alarm_min_consecutive_frames": _deep_get(
+                merged, "inference", "alarm_min_consecutive_frames", 3
+            ),
+            "inference.alarm_cooldown_frames": _deep_get(
+                merged, "inference", "alarm_cooldown_frames", 0
+            ),
             "debug-info.enabled": bool(_deep_get(merged, "debug-info", "enabled", False)),
         },
     }
@@ -148,9 +170,7 @@ def patch_public_settings(updates: dict, path: str = DEFAULT_PATH) -> dict:
             elif typ is bool:
                 val = bool(raw) if not isinstance(raw, str) else raw.lower() in ("1", "true", "yes", "on")
             elif typ is int:
-                val = int(raw)
-                if val <= 0 and pub_key != "debug-info.enabled":
-                    raise ValueError("must be positive")
+                val = _coerce_int_setting(pub_key, raw)
             else:
                 val = str(raw).strip()
             _deep_set(overlay, section, key, val)

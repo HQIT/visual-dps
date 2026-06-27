@@ -12,6 +12,7 @@ import redis.asyncio as aioredis
 from services.annotation_service import camera_annotation_path
 from services.box_identity import parse_collision_token
 from services.event_bus import publish_event_frame
+from services.runtime_config_service import get_public_settings
 from services.event_engine.annotation_boxes import load_scaled_boxes
 from services.event_engine.collision import CollisionProcessor
 from services.event_engine.sharding import owns_camera, shard_config, shard_label
@@ -61,8 +62,7 @@ class EventRedisWorker:
             or str(app_config.get("paths", {}).get("json_dir", "localdata/json"))
         )
         infer_cfg = app_config.get("inference", {}) or {}
-        self._alarm_min = int(infer_cfg.get("alarm_min_consecutive_frames", 3) or 3)
-        self._alarm_cooldown = int(infer_cfg.get("alarm_cooldown_frames", 12) or 12)
+        self._alarm_min, self._alarm_cooldown = self._resolve_alarm_settings(app_config)
         self._video_fps = float(infer_cfg.get("frame_rate", 15) or 15)
         self._delivery = pose_delivery_mode()
         self._shard_count, self._shard_index = shard_config()
@@ -71,6 +71,33 @@ class EventRedisWorker:
         self._listener_task: asyncio.Task | None = None
         self._redis: aioredis.Redis | None = None
         self._pubsub: aioredis.client.PubSub | None = None
+
+    @staticmethod
+    def _resolve_alarm_settings(app_config: dict) -> tuple[int, int]:
+        infer_cfg = app_config.get("inference", {}) or {}
+        items = get_public_settings(app_config).get("items") or {}
+        if "inference.alarm_min_consecutive_frames" in items:
+            alarm_min = int(items["inference.alarm_min_consecutive_frames"])
+        else:
+            alarm_min = int(infer_cfg.get("alarm_min_consecutive_frames", 3) or 3)
+        if "inference.alarm_cooldown_frames" in items:
+            alarm_cooldown = int(items["inference.alarm_cooldown_frames"])
+        else:
+            raw = infer_cfg.get("alarm_cooldown_frames")
+            alarm_cooldown = int(raw if raw is not None else 12)
+        return max(1, alarm_min), max(0, alarm_cooldown)
+
+    @staticmethod
+    def _resolve_bench_alarm_settings(run_row: dict | None, app_config: dict) -> tuple[int, int]:
+        cfg = run_row.get("config") if isinstance(run_row, dict) and isinstance(run_row.get("config"), dict) else {}
+        if cfg.get("inference.alarm_min_consecutive_frames") is not None:
+            alarm_min = max(1, int(cfg["inference.alarm_min_consecutive_frames"]))
+            if cfg.get("inference.alarm_cooldown_frames") is not None:
+                alarm_cooldown = max(0, int(cfg["inference.alarm_cooldown_frames"]))
+            else:
+                _, alarm_cooldown = EventRedisWorker._resolve_alarm_settings(app_config)
+            return alarm_min, alarm_cooldown
+        return EventRedisWorker._resolve_alarm_settings(app_config)
 
     def _resolve_json_path(self, camera_id: str) -> str:
         rel = camera_annotation_path(self._json_dir, camera_id)
@@ -102,6 +129,7 @@ class EventRedisWorker:
         mtime = os.path.getmtime(resolved_json) if os.path.isfile(resolved_json) else 0.0
         bench_started_at: float | None = None
         video_fps = self._video_fps
+        run_row = None
         if json_path and context_key.startswith("bench:"):
             from services.benchmark_store import get_run
 
@@ -128,10 +156,14 @@ class EventRedisWorker:
             boxes = load_scaled_boxes(resolved_json, infer_w, infer_h) if infer_w > 0 and infer_h > 0 else []
             if not boxes:
                 logger.warning("event worker: no boxes for camera=%s path=%s", camera_id, resolved_json)
+            if context_key.startswith("bench:"):
+                alarm_min, alarm_cooldown = self._resolve_bench_alarm_settings(run_row, self.app_config)
+            else:
+                alarm_min, alarm_cooldown = self._resolve_alarm_settings(self.app_config)
             processor = CollisionProcessor(
                 boxes,
-                alarm_min_consecutive_frames=self._alarm_min,
-                alarm_cooldown_frames=self._alarm_cooldown,
+                alarm_min_consecutive_frames=alarm_min,
+                alarm_cooldown_frames=alarm_cooldown,
                 video_fps=video_fps,
             )
             ctx = _CameraContext(

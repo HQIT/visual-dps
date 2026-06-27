@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import MonitorPreviewStage from '../components/MonitorPreviewStage';
 import { apiDelete, apiGet, apiPost } from '../api/client';
 import { parseAnnotationPayload } from '../lib/annotation';
+import { benchCreateFormFields, benchRerunPayload, loadBenchCreateParams, saveBenchCreateParams } from '../lib/benchCreateParams';
 import { formatUserError } from '../lib/userFacingText';
 import './BenchPage.css';
 
@@ -31,6 +32,8 @@ export default function BenchPage() {
   const [cameraId, setCameraId] = useState('cam1');
   const [backend, setBackend] = useState('rtmpose_t');
   const [poseFrameInterval, setPoseFrameInterval] = useState(3);
+  const [alarmMinConsecutiveFrames, setAlarmMinConsecutiveFrames] = useState(3);
+  const [alarmCooldownFrames, setAlarmCooldownFrames] = useState(0);
   const [title, setTitle] = useState('');
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
@@ -38,6 +41,7 @@ export default function BenchPage() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [rerunLoadingId, setRerunLoadingId] = useState('');
+  const defaultsLoadedRef = useRef(false);
 
   const annotation = useMemo(() => {
     if (!preview?.annotation) {
@@ -57,9 +61,23 @@ export default function BenchPage() {
       ]);
       setCameras(Array.isArray(camRes.items) ? camRes.items : camRes.cameras || []);
       setRuns(runRes.items || []);
-      const defaultInterval = Number(settingsRes?.items?.['inference.pose_frame_interval']);
-      if (Number.isFinite(defaultInterval) && defaultInterval >= 1) {
-        setPoseFrameInterval(Math.round(defaultInterval));
+      if (!defaultsLoadedRef.current) {
+        defaultsLoadedRef.current = true;
+        const items = settingsRes?.items || {};
+        const defaultInterval = Number(items['inference.pose_frame_interval']);
+        if (Number.isFinite(defaultInterval) && defaultInterval >= 1) {
+          setPoseFrameInterval(Math.round(defaultInterval));
+        }
+        const defaultAlarmMin = Number(items['inference.alarm_min_consecutive_frames']);
+        if (Number.isFinite(defaultAlarmMin) && defaultAlarmMin >= 1) {
+          setAlarmMinConsecutiveFrames(Math.round(defaultAlarmMin));
+        }
+        const defaultAlarmCooldown = Number(items['inference.alarm_cooldown_frames']);
+        if (Number.isFinite(defaultAlarmCooldown) && defaultAlarmCooldown >= 0) {
+          setAlarmCooldownFrames(Math.round(defaultAlarmCooldown));
+        }
+        const defaultBackend = String(items['models.backend'] || '').trim();
+        if (defaultBackend) setBackend(defaultBackend);
       }
     } catch (err) {
       setError(formatUserError(err.message) || '加载失败');
@@ -73,6 +91,15 @@ export default function BenchPage() {
     const timer = setInterval(loadData, 5000);
     return () => clearInterval(timer);
   }, [loadData]);
+
+  useEffect(() => {
+    saveBenchCreateParams({
+      backend,
+      poseFrameInterval,
+      alarmMinConsecutiveFrames,
+      alarmCooldownFrames,
+    });
+  }, [backend, poseFrameInterval, alarmMinConsecutiveFrames, alarmCooldownFrames]);
 
   useEffect(() => () => {
     if (previewMediaUrl) URL.revokeObjectURL(previewMediaUrl);
@@ -110,10 +137,18 @@ export default function BenchPage() {
     setSubmitLoading(true);
     setError('');
     try {
+      const alarmFields = benchCreateFormFields({
+        backend,
+        poseFrameInterval,
+        alarmMinConsecutiveFrames,
+        alarmCooldownFrames,
+      });
       const fd = new FormData();
       fd.append('camera_id', cameraId);
-      fd.append('backend', backend);
-      fd.append('pose_frame_interval', String(Math.max(1, Math.min(120, Number(poseFrameInterval) || 3))));
+      fd.append('backend', alarmFields.backend);
+      fd.append('pose_frame_interval', alarmFields.pose_frame_interval);
+      fd.append('alarm_min_consecutive_frames', alarmFields.alarm_min_consecutive_frames);
+      fd.append('alarm_cooldown_frames', alarmFields.alarm_cooldown_frames);
       fd.append('title', title || file.name || '');
       fd.append('start', 'true');
       fd.append('file', file);
@@ -139,30 +174,28 @@ export default function BenchPage() {
   };
 
   const handleRerun = async (run) => {
-    let effectiveInterval = run.config?.['inference.pose_frame_interval'];
-    let effectiveBackend = run.backend;
-    try {
-      const settingsRes = await apiGet('/api/settings');
-      const items = settingsRes?.items || {};
-      if (items['inference.pose_frame_interval'] != null) {
-        effectiveInterval = items['inference.pose_frame_interval'];
-      }
-      if (items['models.backend']) {
-        effectiveBackend = items['models.backend'];
-      }
-    } catch {
-      /* 回退 run 快照 */
-    }
+    const params = loadBenchCreateParams({
+      backend: run.backend,
+      poseFrameInterval: run.config?.['inference.pose_frame_interval'],
+      alarmMinConsecutiveFrames: run.config?.['inference.alarm_min_consecutive_frames'],
+      alarmCooldownFrames: run.config?.['inference.alarm_cooldown_frames'],
+    });
     const detail = [
-      `模型：${effectiveBackend || '—'}`,
-      effectiveInterval != null ? `姿态间隔：${effectiveInterval}（系统当前）` : null,
+      `模型：${params.backend || '—'}`,
+      `姿态间隔：${params.poseFrameInterval}`,
+      `告警连续帧：${params.alarmMinConsecutiveFrames}`,
+      `告警冷却帧：${params.alarmCooldownFrames}`,
       `摄像头：${run.camera_id || '—'}`,
+      '（取自上方「新建评测」区当前参数）',
     ].filter(Boolean).join('\n');
-    if (!window.confirm(`按系统当前参数重跑该评测？\n\n${detail}\n\n将清空原有 pose/告警结果。`)) return;
+    if (!window.confirm(`按新建评测区参数重跑该评测？\n\n${detail}\n\n将清空原有 pose/告警结果。`)) return;
     setRerunLoadingId(run.id);
     setError('');
     try {
-      const res = await apiPost(`/api/benchmark/runs/${encodeURIComponent(run.id)}/rerun`, {});
+      const res = await apiPost(
+        `/api/benchmark/runs/${encodeURIComponent(run.id)}/rerun`,
+        benchRerunPayload(params),
+      );
       if (res.status !== 'success') {
         setError(formatUserError(res.error) || res.message || '重跑失败');
         return;
@@ -228,6 +261,30 @@ export default function BenchPage() {
               onChange={(e) => setPoseFrameInterval(Number(e.target.value) || 1)}
             />
             <span className="bench-field-hint">每 N 帧做一次姿态推理；1=每帧，3=默认跳帧</span>
+          </label>
+          <label>
+            告警连续碰撞帧数
+            <input
+              type="number"
+              min={1}
+              max={120}
+              step={1}
+              value={alarmMinConsecutiveFrames}
+              onChange={(e) => setAlarmMinConsecutiveFrames(Number(e.target.value) || 1)}
+            />
+            <span className="bench-field-hint">同一货框连续 N 帧碰撞才触发告警</span>
+          </label>
+          <label>
+            告警冷却帧数
+            <input
+              type="number"
+              min={0}
+              max={600}
+              step={1}
+              value={alarmCooldownFrames}
+              onChange={(e) => setAlarmCooldownFrames(Math.max(0, Number(e.target.value) || 0))}
+            />
+            <span className="bench-field-hint">同一货框两次告警的最小帧间隔；0=无冷却</span>
           </label>
           <label>
             标题（可选）

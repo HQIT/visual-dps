@@ -5,10 +5,12 @@ import { apiGet, apiPost } from '../api/client';
 import { parseAnnotationPayload } from '../lib/annotation';
 import {
   buildFrameEventGroups,
+  collectEventBoxOptions,
   countFrameEvents,
   filterFrameEventGroups,
 } from '../lib/benchEvents';
 import { formatUserError } from '../lib/userFacingText';
+import { benchRerunPayload, loadBenchCreateParams } from '../lib/benchCreateParams';
 import { findFrameAtPlaybackTime, findFrameByIdx, resolveFramePlaybackSec, seekSecForFrame } from '../lib/benchTime';
 import './BenchPage.css';
 
@@ -40,6 +42,7 @@ export default function BenchReplayPage() {
   const [showSkeletonLayer, setShowSkeletonLayer] = useState(true);
   const [showRoiLayer, setShowRoiLayer] = useState(true);
   const [eventFilter, setEventFilter] = useState('all');
+  const [boxFilter, setBoxFilter] = useState('');
   const [rerunLoading, setRerunLoading] = useState(false);
   /** 侧栏点击帧事件后锁定骨架，直到用户播放或拖动进度条 */
   const [pinnedFrameIdx, setPinnedFrameIdx] = useState(null);
@@ -138,9 +141,14 @@ export default function BenchReplayPage() {
     [frames, runFps],
   );
   const eventStats = useMemo(() => countFrameEvents(eventGroups), [eventGroups]);
+  const boxOptions = useMemo(() => collectEventBoxOptions(eventGroups), [eventGroups]);
   const filteredEventGroups = useMemo(
-    () => filterFrameEventGroups(eventGroups, eventFilter),
-    [eventGroups, eventFilter],
+    () => filterFrameEventGroups(eventGroups, eventFilter, boxFilter),
+    [eventGroups, eventFilter, boxFilter],
+  );
+  const filteredEventStats = useMemo(
+    () => countFrameEvents(filteredEventGroups),
+    [filteredEventGroups],
   );
 
   const activeFrame = useMemo(() => {
@@ -193,29 +201,27 @@ export default function BenchReplayPage() {
 
   const handleRerun = async () => {
     if (!runId || !run) return;
-    let effectiveInterval = run.config?.['inference.pose_frame_interval'];
-    let effectiveBackend = run.backend;
-    try {
-      const settingsRes = await apiGet('/api/settings');
-      const items = settingsRes?.items || {};
-      if (items['inference.pose_frame_interval'] != null) {
-        effectiveInterval = items['inference.pose_frame_interval'];
-      }
-      if (items['models.backend']) {
-        effectiveBackend = items['models.backend'];
-      }
-    } catch {
-      /* 回退 run 快照 */
-    }
+    const params = loadBenchCreateParams({
+      backend: run.backend,
+      poseFrameInterval: run.config?.['inference.pose_frame_interval'],
+      alarmMinConsecutiveFrames: run.config?.['inference.alarm_min_consecutive_frames'],
+      alarmCooldownFrames: run.config?.['inference.alarm_cooldown_frames'],
+    });
     const detail = [
-      `模型：${effectiveBackend || '—'}`,
-      effectiveInterval != null ? `姿态间隔：${effectiveInterval}（系统当前）` : null,
+      `模型：${params.backend || '—'}`,
+      `姿态间隔：${params.poseFrameInterval}`,
+      `告警连续帧：${params.alarmMinConsecutiveFrames}`,
+      `告警冷却帧：${params.alarmCooldownFrames}`,
+      '（取自评测页「新建评测」区当前参数）',
     ].filter(Boolean).join('\n');
-    if (!window.confirm(`按系统当前参数重跑？\n\n${detail}\n\n将清空原有结果。`)) return;
+    if (!window.confirm(`按新建评测区参数重跑？\n\n${detail}\n\n将清空原有结果。`)) return;
     setRerunLoading(true);
     setError('');
     try {
-      const res = await apiPost(`/api/benchmark/runs/${encodeURIComponent(runId)}/rerun`, {});
+      const res = await apiPost(
+        `/api/benchmark/runs/${encodeURIComponent(runId)}/rerun`,
+        benchRerunPayload(params),
+      );
       if (res.status !== 'success') {
         setError(formatUserError(res.error) || res.message || '重跑失败');
         return;
@@ -230,6 +236,7 @@ export default function BenchReplayPage() {
   };
 
   const videoUrl = runId ? `/api/benchmark/runs/${encodeURIComponent(runId)}/video` : '';
+  const exportUrl = runId ? `/api/benchmark/runs/${encodeURIComponent(runId)}/export` : '';
   const poseDriftSec = activePlaybackSec != null
     ? Math.abs(currentTime - activePlaybackSec)
     : null;
@@ -252,6 +259,11 @@ export default function BenchReplayPage() {
           ) : null}
         </div>
         <div className="bench-replay-toggles">
+          {run && run.status !== 'running' ? (
+            <a href={exportUrl} className="bench-export-btn" download>
+              导出 Excel
+            </a>
+          ) : null}
           {run && run.status !== 'running' ? (
             <button type="button" className="bench-rerun-btn" disabled={rerunLoading} onClick={handleRerun}>
               {rerunLoading ? '重跑中…' : '重跑'}
@@ -301,8 +313,40 @@ export default function BenchReplayPage() {
           <div className="bench-replay-side-head">
             <h3>帧事件</h3>
             <p className="bench-replay-side-stats">
-              {eventStats.frames} 帧 · 碰撞 {eventStats.collisions} · 告警 {eventStats.alarms}
+              {boxFilter || eventFilter !== 'all'
+                ? `${filteredEventStats.frames} / ${eventStats.frames} 帧 · 碰撞 ${filteredEventStats.collisions} · 告警 ${filteredEventStats.alarms}`
+                : `${eventStats.frames} 帧 · 碰撞 ${eventStats.collisions} · 告警 ${eventStats.alarms}`}
             </p>
+          </div>
+          <div className="bench-event-box-filter">
+            <label htmlFor="bench-box-filter">货框 ID</label>
+            <div className="bench-event-box-filter-row">
+              <input
+                id="bench-box-filter"
+                type="search"
+                className="bench-event-box-search"
+                placeholder="输入或选择 box_id"
+                value={boxFilter}
+                onChange={(e) => setBoxFilter(e.target.value)}
+                list="bench-box-id-list"
+              />
+              <select
+                className="bench-event-box-select"
+                value={boxOptions.some((opt) => opt.value === boxFilter) ? boxFilter : ''}
+                onChange={(e) => setBoxFilter(e.target.value)}
+                aria-label="选择货框"
+              >
+                <option value="">全部</option>
+                {boxOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+            <datalist id="bench-box-id-list">
+              {boxOptions.map((opt) => (
+                <option key={opt.value} value={opt.boxId || opt.label} />
+              ))}
+            </datalist>
           </div>
           <div className="bench-event-filters" role="tablist" aria-label="事件筛选">
             {[
@@ -323,7 +367,12 @@ export default function BenchReplayPage() {
             ))}
           </div>
           {!filteredEventGroups.length ? (
-            <p className="bench-empty">暂无{eventFilter === 'all' ? '' : eventFilter === 'alarm' ? '告警' : '碰撞'}事件</p>
+            <p className="bench-empty">
+              暂无
+              {boxFilter ? `货框「${boxFilter}」` : ''}
+              {eventFilter === 'all' ? '' : eventFilter === 'alarm' ? '告警' : '碰撞'}
+              事件
+            </p>
           ) : null}
           <ul className="bench-event-list">
             {filteredEventGroups.map((group) => {

@@ -11,7 +11,7 @@ load_build_env "${ROOT}"
 source scripts/lib/docker-image-tag.sh
 # shellcheck disable=SC1091
 source scripts/lib/sync-visual-dps-image-tag-env.sh
-export VISUAL_DPS_IMAGE_TAG="$(visual_dps_image_tag)"
+export VISUAL_DPS_IMAGE_TAG="${VISUAL_DPS_IMAGE_TAG:-$(visual_dps_image_tag)}"
 
 echo "==> 构建前端 (web/dist)..."
 (cd web && npm run build)

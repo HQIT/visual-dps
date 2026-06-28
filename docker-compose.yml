@@ -118,6 +118,7 @@ services:
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
       - JSON_DIR=/app/localdata/json
       - POSE_DELIVERY=stream
+      - COLLISION_LOG=${COLLISION_LOG:-0}
     volumes:
       - ./app_config.json:/app/app_config.json:ro
       - ./localdata:/app/localdata

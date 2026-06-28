@@ -1,11 +1,11 @@
 {
   "models": {
-    "backend": "rtmpose_onnx"
+    "backend": "rtmpose_m"
   },
   "inference": {
     "frame_rate": 15,
     "height": 240,
-    "pose_frame_interval": 5
+    "pose_frame_interval": 1
   },
   "debug-info": {
     "enabled": false

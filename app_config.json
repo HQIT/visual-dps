@@ -30,11 +30,11 @@
     "inference": {
         "frame_rate": 15,
         "height": 480,
-        "pose_frame_interval": 3,
+        "pose_frame_interval": 1,
         "stream_buffer_size": 1,
         "preview_max_width": 640,
         "preview_jpeg_quality": 60,
-        "alarm_min_consecutive_frames": 3,
+        "alarm_min_consecutive_frames": 7,
         "alarm_cooldown_frames": 6
     },
     "debug-info": {

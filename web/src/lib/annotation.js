@@ -206,7 +206,27 @@ export function parseCollisionToken(token) {
   return { shelf_code: '', box_id: text };
 }
 
+/** 判断碰撞 token 是否对应某货位（兼容 ``Box_{id}`` 与 ``{shelf}:{id}``） */
 export function collisionMatchesBox(token, box) {
+  const text = String(token || '').trim();
+  if (!text || !box) return false;
   const key = boxRoiKey(box);
-  return Boolean(key) && key === String(token || '').trim();
+  if (key && key === text) return true;
+
+  const parsed = parseCollisionToken(text);
+  const boxId = String(box?.box_id ?? box?.id ?? '').trim();
+  if (!parsed.box_id || !boxId || parsed.box_id !== boxId) return false;
+
+  // 后端 legacy 扁平 JSON 发 Box_{id}，前端展示可能带 shelf 前缀
+  if (text.startsWith('Box_')) return true;
+
+  const boxShelf = String(box?.shelf_code || '').trim();
+  if (!parsed.shelf_code || !boxShelf) return true;
+  return boxShelf === parsed.shelf_code;
+}
+
+export function boxMatchesAnyCollision(box, tokens) {
+  if (!box || tokens == null) return false;
+  const list = Array.isArray(tokens) ? tokens : [...tokens];
+  return list.some((token) => collisionMatchesBox(token, box));
 }

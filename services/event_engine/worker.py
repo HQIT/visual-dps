@@ -84,8 +84,11 @@ class EventRedisWorker:
             or str(app_config.get("paths", {}).get("json_dir", "localdata/json"))
         )
         infer_cfg = app_config.get("inference", {}) or {}
-        self._alarm_min = int(infer_cfg.get("alarm_min_consecutive_frames", 3) or 3)
-        self._alarm_cooldown = int(infer_cfg.get("alarm_cooldown_frames", 12) or 12)
+        self._alarm_min = max(1, int(infer_cfg.get("alarm_min_consecutive_frames", 3) or 3))
+        if "alarm_cooldown_frames" in infer_cfg:
+            self._alarm_cooldown = max(0, int(infer_cfg["alarm_cooldown_frames"]))
+        else:
+            self._alarm_cooldown = 12
         self._video_fps = float(infer_cfg.get("frame_rate", 15) or 15)
         self._delivery = pose_delivery_mode()
         self._shard_count, self._shard_index = shard_config()

@@ -68,7 +68,7 @@ class CollisionProcessor:
     ):
         self.boxes = boxes
         self.alarm_min_consecutive_frames = max(1, int(alarm_min_consecutive_frames))
-        self.alarm_cooldown_frames = max(1, int(alarm_cooldown_frames))
+        self.alarm_cooldown_frames = max(0, int(alarm_cooldown_frames))
         self.video_fps = max(1.0, float(video_fps))
         self.person_assigner = PersonTrackAssigner(max_match_dist=220.0, stale_sec=1.2)
         self._box_consecutive_hits: dict[str, int] = {}

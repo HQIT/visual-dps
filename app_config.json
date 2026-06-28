@@ -35,7 +35,7 @@
         "preview_max_width": 640,
         "preview_jpeg_quality": 60,
         "alarm_min_consecutive_frames": 7,
-        "alarm_cooldown_frames": 6
+        "alarm_cooldown_frames": 0
     },
     "debug-info": {
         "enabled": false,

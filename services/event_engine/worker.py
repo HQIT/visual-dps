@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+from datetime import datetime
 
 import redis.asyncio as aioredis
 
@@ -26,6 +27,36 @@ from services.pose_bus import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _collision_log_enabled() -> bool:
+    return os.environ.get("COLLISION_LOG", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _collision_log_wall_time() -> str:
+    """日志用标准本地时间：YYYY-MM-DD HH:MM:SS"""
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _format_log_video_time(sec: float) -> str:
+    total = max(0.0, float(sec))
+    m, s = divmod(int(total), 60)
+    ms = int(round((total - int(total)) * 1000))
+    return f"{m:02d}:{s:02d}.{ms:03d}"
+
+
+def _resolve_log_video_time(pose: dict, fallback_fps: float) -> tuple[float, str]:
+    vts = pose.get("video_time_sec")
+    if vts is not None:
+        try:
+            sec = float(vts)
+            return sec, _format_log_video_time(sec)
+        except (TypeError, ValueError):
+            pass
+    frame_idx = int(pose.get("frame_idx") or 0)
+    fps = float(pose.get("video_fps") or fallback_fps or 15.0)
+    sec = max(0.0, float(frame_idx - 1) / fps) if frame_idx > 0 and fps > 0 else 0.0
+    return sec, _format_log_video_time(sec)
 
 
 class _CameraContext:
@@ -108,6 +139,34 @@ class EventRedisWorker:
             self._contexts[camera_id] = ctx
 
         return ctx.processor
+
+    def _log_collisions(
+        self,
+        pose: dict,
+        collisions: list,
+        alarm_collisions: list,
+    ) -> None:
+        if not _collision_log_enabled():
+            return
+        camera_id = str(pose.get("camera_id") or "")
+        frame_idx = int(pose.get("frame_idx") or 0)
+        run_id = str(pose.get("run_id") or "")
+        vsec, vtext = _resolve_log_video_time(pose, self._video_fps)
+        src = pose.get("source_mode") or "stream"
+        lat = pose.get("latency_ms") or {}
+        wall_time = _collision_log_wall_time()
+        prefix = f"[COLLISION][HIT] time={wall_time} camera={camera_id} source={src}"
+        if run_id:
+            prefix += f" run_id={run_id}"
+        prefix += f" video_time={vtext} video_sec={vsec:.3f} frame={frame_idx}"
+        if collisions:
+            print(f"{prefix} hits={collisions} latency_ms={lat}", flush=True)
+        if alarm_collisions:
+            print(
+                f"{prefix.replace('[HIT]', '[ALARM]')} alarms={alarm_collisions} "
+                f"hits={collisions} latency_ms={lat}",
+                flush=True,
+            )
 
     async def start(self) -> None:
         if self._listener_task and not self._listener_task.done():
@@ -244,6 +303,8 @@ class EventRedisWorker:
         collisions = result.get("collisions") or []
         alarm_collisions = result.get("alarm_collisions") or []
         skeletons = result.get("skeletons")
+
+        self._log_collisions(pose, collisions, alarm_collisions)
 
         await asyncio.to_thread(
             publish_event_frame,

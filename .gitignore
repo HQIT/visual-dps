@@ -11,6 +11,7 @@ localdata/logs/
 localdata/frames/
 localdata/inference/
 localdata/models/
+localdata/benchmark
 localdata/mediamtx.yml
 localdata/json/cameras/
 localdata/upload_counter.txt

@@ -5,7 +5,7 @@
   "inference": {
     "frame_rate": 15,
     "height": 240,
-    "pose_frame_interval": 1
+    "pose_frame_interval": 2
   },
   "debug-info": {
     "enabled": false

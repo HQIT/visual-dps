@@ -96,13 +96,21 @@ def _validate_config_or_raise(cfg: dict, config_file: str):
     if isinstance(models_cfg, dict):
         backend = str(models_cfg.get("backend", "rtmpose_t")).strip().lower()
         try:
-            from services.inference_backends.model_registry import normalize_backend_setting
-
-            normalize_backend_setting(backend)
-        except ValueError:
-            errors.append(f"models.backend 无效: {backend}")
+            from services.inference_backends.model_registry import (
+                normalize_backend_setting,
+                normalize_det_setting,
+            )
         except ImportError:
             pass
+        else:
+            try:
+                normalize_backend_setting(backend)
+            except ValueError:
+                errors.append(f"models.backend 无效: {backend}")
+            try:
+                normalize_det_setting(str(models_cfg.get("det", "nano")).strip().lower())
+            except ValueError:
+                errors.append(f"models.det 无效: {models_cfg.get('det', 'nano')}")
 
     if errors:
         msg = [f"配置文件校验失败: {config_file}"]

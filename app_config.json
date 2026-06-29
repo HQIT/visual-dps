@@ -19,6 +19,7 @@
     },
     "models": {
         "backend": "rtmpose_t",
+        "det": "nano",
         "rtmpose_onnx_det_path": "localdata/models/rtmpose_onnx/rtmdet_nano/end2end.onnx",
         "rtmpose_onnx_det_url": "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/rtmdet_nano_8xb32-100e_coco-obj365-person-05d8511e.zip",
         "rtmpose_onnx_pose_path": "localdata/models/rtmpose_onnx/rtmpose_t/end2end.onnx",
@@ -34,7 +35,7 @@
         "stream_buffer_size": 1,
         "preview_max_width": 640,
         "preview_jpeg_quality": 60,
-        "alarm_min_consecutive_frames": 7,
+        "alarm_min_consecutive_frames": 3,
         "alarm_cooldown_frames": 0
     },
     "debug-info": {

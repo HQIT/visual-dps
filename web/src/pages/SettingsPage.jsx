@@ -6,6 +6,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import UserDrawer from '../components/UserDrawer';
 import FieldHint from '../components/FieldHint';
 import { CAMERA_OVERRIDE_FIELDS } from '../lib/cameraSettings';
+import { InferenceModelGlobalFields } from '../components/InferenceModelFields';
 import { formatUserError } from '../lib/userFacingText';
 import './SettingsPage.css';
 
@@ -274,6 +275,14 @@ export default function SettingsPage() {
               以下为<strong>全局默认值</strong>。未单独配置的摄像头将自动使用；在摄像头设置中可勾选「自定义」覆盖。
             </p>
             <div className="settings-form-fields">
+              <InferenceModelGlobalFields
+                backend={settings['models.backend']}
+                det={settings['models.det']}
+                onBackendChange={(value) =>
+                  setSettings((s) => ({ ...s, 'models.backend': value }))
+                }
+                onDetChange={(value) => setSettings((s) => ({ ...s, 'models.det': value }))}
+              />
               {CAMERA_OVERRIDE_FIELDS.map((field) => (
                 <label key={field.key}>
                   <span className="settings-field-label">

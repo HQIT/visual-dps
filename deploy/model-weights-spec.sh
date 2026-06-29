@@ -4,6 +4,7 @@
 vdps_each_required_model_weight() {
   cat <<'EOF'
 rtmpose_onnx/rtmdet_nano/end2end.onnx
+rtmpose_onnx/rtmdet_m/end2end.onnx
 rtmpose_onnx/rtmpose_t/end2end.onnx
 rtmpose_onnx/rtmpose_s/end2end.onnx
 rtmpose_onnx/rtmpose_m/end2end.onnx
@@ -17,6 +18,7 @@ EOF
 vdps_model_min_bytes() {
   case "$1" in
     rtmpose_onnx/rtmdet_nano/end2end.onnx) echo 500000 ;;
+    rtmpose_onnx/rtmdet_m/end2end.onnx) echo 10000000 ;;
     rtmpose_onnx/rtmpose_t/end2end.onnx) echo 8000000 ;;
     rtmpose_onnx/rtmpose_s/end2end.onnx) echo 15000000 ;;
     rtmpose_onnx/rtmpose_m/end2end.onnx) echo 25000000 ;;
@@ -32,6 +34,7 @@ vdps_model_min_bytes() {
 vdps_rtmpose_zip_min_bytes() {
   case "$1" in
     rtmdet_nano) echo 2000000 ;;
+    rtmdet_m) echo 50000000 ;;
     rtmpose_t) echo 5000000 ;;
     rtmpose_s) echo 10000000 ;;
     rtmpose_m) echo 20000000 ;;

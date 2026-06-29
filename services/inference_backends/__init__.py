@@ -11,6 +11,7 @@ from services.inference_backends.model_registry import (
     ModelPreset,
     normalize_backend_setting,
     resolve_backend_family,
+    resolve_det_variant,
     resolve_model_preset,
 )
 
@@ -32,7 +33,12 @@ def create_inference_backend(app_config: dict, executor):
     if preset.family == BACKEND_RTMPOSE_ONNX:
         from services.inference_backends.rtmpose_onnx_backend import RTMPoseOnnxBackend
 
-        return RTMPoseOnnxBackend(app_config, executor, variant=preset.variant)
+        return RTMPoseOnnxBackend(
+            app_config,
+            executor,
+            variant=preset.variant,
+            det_variant=resolve_det_variant(app_config),
+        )
     if preset.family == BACKEND_YOLO_POSE:
         from services.inference_backends.yolo_pose_backend import YoloPoseBackend
 

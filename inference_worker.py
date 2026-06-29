@@ -57,6 +57,9 @@ def _apply_inference_env_overrides(app_config: dict) -> None:
     raw_backend = os.environ.get("INFERENCE_BACKEND", "").strip()
     if raw_backend:
         app_config.setdefault("models", {})["backend"] = raw_backend
+    raw_det = os.environ.get("INFERENCE_RTM_DET", "").strip()
+    if raw_det:
+        app_config.setdefault("models", {})["det"] = raw_det.lower()
 
 
 def _status_path(base_dir: str, camera_id: str) -> str:

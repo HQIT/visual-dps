@@ -69,6 +69,7 @@ fetch_one() {
 }
 
 fetch_one rtmdet_nano "rtmdet_nano_8xb32-100e_coco-obj365-person-05d8511e.zip"
+fetch_one rtmdet_m "rtmdet_m_8xb32-100e_coco-obj365-person-235e8209.zip"
 fetch_one rtmpose_t "rtmpose-t_simcc-body7_pt-body7_420e-256x192-026a1439_20230504.zip"
 fetch_one rtmpose_s "rtmpose-s_simcc-body7_pt-body7_420e-256x192-acd4a1ef_20230504.zip"
 fetch_one rtmpose_m "rtmpose-m_simcc-body7_pt-body7_420e-256x192-e48f03d0_20230504.zip"

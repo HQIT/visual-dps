@@ -1,5 +1,10 @@
 import InferenceToggle from './InferenceToggle';
-import { CAMERA_OVERRIDE_FIELDS, formatSettingDisplayValue } from '../lib/cameraSettings';
+import { InferenceModelOverrideCard } from './InferenceModelFields';
+import {
+  CAMERA_OVERRIDE_FIELDS,
+  DEFAULT_RTM_DET,
+  formatSettingDisplayValue,
+} from '../lib/cameraSettings';
 import {
   CAMERA_SOURCE_TYPES,
   DEFAULT_SOURCE_TYPE,
@@ -272,6 +277,35 @@ export default function CameraSetupDrawer({
                 </p>
               </div>
               <div className="drawer-settings-grid">
+                <InferenceModelOverrideCard
+                  settings={settings}
+                  globalDefaults={globalDefaults}
+                  effectiveSettings={effectiveSettings}
+                  onEnableCustom={() => {
+                    setSettings({
+                      ...settings,
+                      'models.backend':
+                        settings['models.backend'] ??
+                        effectiveSettings['models.backend'] ??
+                        globalDefaults['models.backend'] ??
+                        'rtmpose_t',
+                      'models.det':
+                        settings['models.det'] ??
+                        effectiveSettings['models.det'] ??
+                        globalDefaults['models.det'] ??
+                        DEFAULT_RTM_DET,
+                    });
+                  }}
+                  onDisableCustom={() => {
+                    const next = { ...settings };
+                    delete next['models.backend'];
+                    delete next['models.det'];
+                    setSettings(next);
+                  }}
+                  onSetValue={(key, raw) => {
+                    setSettings({ ...settings, [key]: String(raw) });
+                  }}
+                />
                 {CAMERA_OVERRIDE_FIELDS.map((field) => {
                   const customized = Object.prototype.hasOwnProperty.call(settings, field.key);
                   const globalVal = globalDefaults[field.key];

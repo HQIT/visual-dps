@@ -1,6 +1,7 @@
 # 推理权重清单：相对 localdata/models/ 的路径 + 最小字节（存在且 >= 此值 才视为完整）
 # 用于 download / export / install 统一校验，避免半截下载被当成已有文件
 rtmpose_onnx/rtmdet_nano/end2end.onnx	500000
+rtmpose_onnx/rtmdet_m/end2end.onnx	10000000
 rtmpose_onnx/rtmpose_t/end2end.onnx	8000000
 rtmpose_onnx/rtmpose_s/end2end.onnx	15000000
 rtmpose_onnx/rtmpose_m/end2end.onnx	25000000

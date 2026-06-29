@@ -8,8 +8,10 @@ from typing import Any
 
 from services.inference_backends.model_registry import (
     ALLOWED_PRESET_IDS,
+    DEFAULT_DET_VARIANT,
     DEFAULT_PRESET_ID,
     normalize_backend_setting,
+    normalize_det_setting,
 )
 
 DEFAULT_PATH = os.environ.get("RUNTIME_CONFIG_FILE", "localdata/runtime_config.json")
@@ -17,6 +19,7 @@ DEFAULT_PATH = os.environ.get("RUNTIME_CONFIG_FILE", "localdata/runtime_config.j
 # 现场暴露项（与 ROADMAP 一致）
 PUBLIC_KEYS = {
     "models.backend": ("models", "backend", str),
+    "models.det": ("models", "det", str),
     "inference.frame_rate": ("inference", "frame_rate", int),
     "inference.height": ("inference", "height", int),
     "inference.pose_frame_interval": ("inference", "pose_frame_interval", int),
@@ -28,6 +31,7 @@ CAMERA_OVERRIDE_KEYS = {
     k: PUBLIC_KEYS[k]
     for k in (
         "models.backend",
+        "models.det",
         "inference.frame_rate",
         "inference.height",
         "inference.pose_frame_interval",
@@ -69,6 +73,8 @@ def _normalize_backend(raw: Any) -> str:
 def _coerce_setting_value(pub_key: str, raw: Any, typ: type) -> Any:
     if pub_key == "models.backend":
         return _normalize_backend(raw)
+    if pub_key == "models.det":
+        return normalize_det_setting(str(raw))
     if typ is bool:
         if isinstance(raw, bool):
             return raw
@@ -122,10 +128,17 @@ def get_public_settings(app_config: dict | None, path: str = DEFAULT_PATH) -> di
     except ValueError:
         backend = DEFAULT_PRESET_ID
 
+    det_raw = str(_deep_get(merged, "models", "det", DEFAULT_DET_VARIANT) or DEFAULT_DET_VARIANT).strip().lower()
+    try:
+        det = normalize_det_setting(det_raw)
+    except ValueError:
+        det = DEFAULT_DET_VARIANT
+
     return {
         "status": "success",
         "items": {
             "models.backend": backend,
+            "models.det": det,
             "inference.frame_rate": _deep_get(merged, "inference", "frame_rate", 15),
             "inference.height": _deep_get(merged, "inference", "height", 480),
             "inference.pose_frame_interval": _deep_get(merged, "inference", "pose_frame_interval", 3),
@@ -145,6 +158,8 @@ def patch_public_settings(updates: dict, path: str = DEFAULT_PATH) -> dict:
         try:
             if pub_key == "models.backend":
                 val = _normalize_backend(raw)
+            elif pub_key == "models.det":
+                val = normalize_det_setting(str(raw))
             elif typ is bool:
                 val = bool(raw) if not isinstance(raw, str) else raw.lower() in ("1", "true", "yes", "on")
             elif typ is int:

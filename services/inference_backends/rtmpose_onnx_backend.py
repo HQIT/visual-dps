@@ -1,4 +1,4 @@
-"""RTMDet-nano + RTMPose t/s/m（ONNX Runtime）。"""
+"""RTMDet + RTMPose t/s/m（ONNX Runtime，det 可选 nano / m）。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,12 @@ import os
 import numpy as np
 
 from services.inference_backends.base import PoseBatch
-from services.inference_backends.model_registry import RTMPOSE_VARIANT_ASSETS
+from services.inference_backends.model_registry import (
+    DEFAULT_DET_VARIANT,
+    RTMPOSE_POSE_ASSETS,
+    resolve_det_variant,
+    resolve_rtm_assets,
+)
 from services.inference_backends.onnx_assets import ensure_onnx_from_zip
 
 
@@ -64,12 +69,20 @@ def _resolve_model_path(app_config: dict, subdir: str) -> str:
 class RTMPoseOnnxBackend:
     name = "rtmpose_onnx"
 
-    def __init__(self, app_config: dict, executor, *, variant: str = "t"):
+    def __init__(
+        self,
+        app_config: dict,
+        executor,
+        *,
+        variant: str = "t",
+        det_variant: str | None = None,
+    ):
         self.app_config = app_config
         self._executor = executor
         self._variant = str(variant or "t").lower()
-        if self._variant not in RTMPOSE_VARIANT_ASSETS:
+        if self._variant not in RTMPOSE_POSE_ASSETS:
             self._variant = "t"
+        self._det_variant = str(det_variant or resolve_det_variant(app_config) or DEFAULT_DET_VARIANT).lower()
         self._det = None
         self._pose = None
 
@@ -80,7 +93,7 @@ class RTMPoseOnnxBackend:
         from rtmlib.tools.object_detection.rtmdet import RTMDet
         from rtmlib.tools.pose_estimation.rtmpose import RTMPose
 
-        assets = RTMPOSE_VARIANT_ASSETS[self._variant]
+        assets = resolve_rtm_assets(self._variant, self._det_variant)
         models_cfg = self.app_config.get("models", {})
         det_path = _resolve_model_path(self.app_config, str(assets["det_dir"]))
         pose_path = _resolve_model_path(self.app_config, str(assets["pose_dir"]))
@@ -93,7 +106,7 @@ class RTMPoseOnnxBackend:
         pose_input_size = (int(pose_size[0]), int(pose_size[1]))
 
         print(
-            f"🚀 正在加载 RTMDet + RTMPose-{self._variant.upper()}（ONNX）…"
+            f"🚀 正在加载 RTMDet-{self._det_variant.upper()} + RTMPose-{self._variant.upper()}（ONNX）…"
         )
         ensure_onnx_from_zip(det_path, det_url)
         ensure_onnx_from_zip(pose_path, pose_url)
@@ -144,7 +157,8 @@ class RTMPoseOnnxBackend:
             _load_models(device)
 
         print(
-            f"✅ RTMPose-{self._variant.upper()} ONNX 已就绪: det={det_path} pose={pose_path} device={device}"
+            f"✅ RTMDet-{self._det_variant.upper()} + RTMPose-{self._variant.upper()} ONNX 已就绪: "
+            f"det={det_path} pose={pose_path} device={device}"
         )
 
     def _detect_sync(self, frame) -> np.ndarray:

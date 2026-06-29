@@ -1,0 +1,37 @@
+.inference-model-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.inference-model-fields--drawer {
+  gap: 0.5rem;
+}
+
+.inference-model-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.inference-model-row-label {
+  font-size: 0.78rem;
+  color: var(--text-muted, #8a8f98);
+}
+
+.inference-model-hint,
+.inference-model-card .drawer-param-hint {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--text-muted, #8a8f98);
+}
+
+.inference-model-follow-global {
+  font-size: 0.72rem;
+  color: var(--text-muted, #8a8f98);
+}
+
+.inference-model-card .inference-model-fields {
+  margin-bottom: 0.25rem;
+}

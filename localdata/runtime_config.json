@@ -6,7 +6,9 @@
   "inference": {
     "frame_rate": 15,
     "height": 240,
-    "pose_frame_interval": 2
+    "pose_frame_interval": 2,
+    "alarm_min_consecutive_frames": 3,
+    "alarm_cooldown_frames": 0
   },
   "debug-info": {
     "enabled": false

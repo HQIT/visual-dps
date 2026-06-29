@@ -86,6 +86,7 @@ class EventRedisWorker:
         )
         self._runtime_config_path = os.environ.get("RUNTIME_CONFIG_FILE", DEFAULT_PATH)
         self._alarm_settings_mtime: float | None = None
+        self._contexts: dict[str, _CameraContext] = {}
         infer_cfg = get_merged_inference_section(app_config, self._runtime_config_path)
         self._apply_alarm_settings(infer_cfg)
         try:
@@ -99,7 +100,6 @@ class EventRedisWorker:
         self._delivery = pose_delivery_mode()
         self._shard_count, self._shard_index = shard_config()
         self._consumer_name = default_consumer_name()
-        self._contexts: dict[str, _CameraContext] = {}
         self._listener_task: asyncio.Task | None = None
         self._redis: aioredis.Redis | None = None
         self._pubsub: aioredis.client.PubSub | None = None

@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 import os
-from datetime import datetime
+from services.wall_clock import wall_time_str
 
 import redis.asyncio as aioredis
 
@@ -35,7 +35,7 @@ def _collision_log_enabled() -> bool:
 
 def _collision_log_wall_time() -> str:
     """日志用标准本地时间：YYYY-MM-DD HH:MM:SS"""
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return wall_time_str()
 
 
 def _format_log_video_time(sec: float) -> str:

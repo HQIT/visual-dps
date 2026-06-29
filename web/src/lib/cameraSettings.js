@@ -102,14 +102,16 @@ export function backendLabel(value) {
   return backendShortLabel(value);
 }
 
-/** 监控页展示：优先用推理容器实际 backend，其次摄像头 effective_settings */
+/** 监控页展示：优先用推理容器实际 backend + rtm_det，其次 effective_settings */
 export function resolveCameraModelLabel(camera) {
   if (!camera) return '—';
   const backend = normalizeBackendId(
     camera.inference?.backend || camera.effective_settings?.['models.backend'],
   );
   if (isRtmposeBackend(backend)) {
-    const det = normalizeDetId(camera.effective_settings?.['models.det']);
+    const det = normalizeDetId(
+      camera.inference?.rtm_det || camera.effective_settings?.['models.det'],
+    );
     return `${backendShortLabel(backend)} + ${detShortLabel(det)}`;
   }
   return backendShortLabel(backend);

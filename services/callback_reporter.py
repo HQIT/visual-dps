@@ -11,9 +11,11 @@ import json
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 from urllib import error, request
+
+from services.wall_clock import epoch_ms, wall_time_str
 
 
 @dataclass
@@ -86,7 +88,8 @@ class CollisionCallbackReporter:
             self.enabled = False
 
     def _now_iso(self) -> str:
-        return datetime.now(timezone.utc).isoformat()
+        # 与 wall_time_str 一致，使用容器 TZ（默认 Asia/Shanghai）
+        return datetime.now().astimezone().isoformat(timespec="seconds")
 
     async def start(self):
         if not self.enabled or self._running:
@@ -172,7 +175,7 @@ class CollisionCallbackReporter:
         if not self.enabled:
             return None
 
-        now_ms = int(time.time() * 1000)
+        now_ms = epoch_ms()
         box_id_text = str(box_id).strip()
         if not box_id_text:
             return None
@@ -305,8 +308,8 @@ class CollisionCallbackReporter:
         rec.updated_at = self._now_iso()
 
         print(
-            f"[CALLBACK][SEND] event_id={event_id} url={self.callback_url} "
-            f"payload={json.dumps(payload, ensure_ascii=False)}"
+            f"[CALLBACK][SEND] time={wall_time_str()} event_id={event_id} url={self.callback_url} "
+            f"finishTime={payload.get('finishTime')} payload={json.dumps(payload, ensure_ascii=False)}"
         )
 
         ok, http_status, response_body, err = await asyncio.to_thread(self._post_json, payload)
@@ -325,7 +328,7 @@ class CollisionCallbackReporter:
                 detail={"event_id": event_id, "http_status": http_status},
             )
             print(
-                f"[CALLBACK][ACK] event_id={event_id} status={http_status} "
+                f"[CALLBACK][ACK] time={wall_time_str()} event_id={event_id} status={http_status} "
                 f"response={json.dumps(response_body, ensure_ascii=False)}"
             )
             self._persist_record_redis(event_id)
@@ -340,7 +343,7 @@ class CollisionCallbackReporter:
         if is_client_error:
             rec.status = "REJECT"
             print(
-                f"[CALLBACK][REJECT] event_id={event_id} status={http_status} "
+                f"[CALLBACK][REJECT] time={wall_time_str()} event_id={event_id} status={http_status} "
                 f"error={err} response={json.dumps(response_body, ensure_ascii=False)}"
             )
         else:
@@ -354,7 +357,7 @@ class CollisionCallbackReporter:
                 detail={"event_id": event_id, "error": rec.error, "http_status": rec.http_status},
             )
             print(
-                f"[CALLBACK][FAILED] event_id={event_id} status={rec.http_status} "
+                f"[CALLBACK][FAILED] time={wall_time_str()} event_id={event_id} status={rec.http_status} "
                 f"error={rec.error} response={json.dumps(rec.response_body, ensure_ascii=False)}"
             )
         self._persist_record_redis(event_id)

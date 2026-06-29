@@ -78,10 +78,12 @@ services:
       - POSE_DELIVERY=stream
       - POSE_STREAM_KEY=pose:stream
       - POSE_STREAM_GROUP=event-workers
+      - TZ=${TZ:-Asia/Shanghai}
     volumes:
       - ./app_config.json:/app/app_config.json:ro
       - ./localdata:/app/localdata
       - /var/run/docker.sock:/var/run/docker.sock
+      - /etc/localtime:/etc/localtime:ro
     restart: unless-stopped
 
   visual-dps-event-worker:
@@ -100,9 +102,11 @@ services:
       - JSON_DIR=/app/localdata/json
       - POSE_DELIVERY=stream
       - COLLISION_LOG=${COLLISION_LOG:-0}
+      - TZ=${TZ:-Asia/Shanghai}
     volumes:
       - ./app_config.json:/app/app_config.json:ro
       - ./localdata:/app/localdata
+      - /etc/localtime:/etc/localtime:ro
     restart: unless-stopped
 
 networks:

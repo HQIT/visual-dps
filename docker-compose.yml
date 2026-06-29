@@ -12,6 +12,13 @@ x-china-build-args: &china-build-args
   HTTP_PROXY: ${BUILD_HTTP_PROXY:-}
   HTTPS_PROXY: ${BUILD_HTTPS_PROXY:-${BUILD_HTTP_PROXY:-}}
 
+# 容器时区：与宿主机日志对齐（国内默认 Asia/Shanghai，可 .env 覆盖 TZ）
+x-tz-env: &tz-env
+  TZ: ${TZ:-Asia/Shanghai}
+
+x-tz-volumes: &tz-volumes
+  - /etc/localtime:/etc/localtime:ro
+
 services:
   redis:
     image: redis:7
@@ -93,10 +100,12 @@ services:
       - POSE_DELIVERY=stream
       - POSE_STREAM_KEY=pose:stream
       - POSE_STREAM_GROUP=event-workers
+      - TZ=${TZ:-Asia/Shanghai}
     volumes:
       - ./app_config.json:/app/app_config.json:ro
       - ./localdata:/app/localdata
       - /var/run/docker.sock:/var/run/docker.sock
+      - /etc/localtime:/etc/localtime:ro
     restart: unless-stopped
 
   visual-dps-event-worker:
@@ -119,9 +128,11 @@ services:
       - JSON_DIR=/app/localdata/json
       - POSE_DELIVERY=stream
       - COLLISION_LOG=${COLLISION_LOG:-0}
+      - TZ=${TZ:-Asia/Shanghai}
     volumes:
       - ./app_config.json:/app/app_config.json:ro
       - ./localdata:/app/localdata
+      - /etc/localtime:/etc/localtime:ro
     restart: unless-stopped
 
   # 以下为推理镜像构建目标（不会随 compose up 自动启动；由 UI 按摄像头 docker run）

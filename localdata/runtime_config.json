@@ -1,6 +1,7 @@
 {
   "models": {
-    "backend": "rtmpose_m"
+    "backend": "rtmpose_m",
+    "det": "m"
   },
   "inference": {
     "frame_rate": 15,

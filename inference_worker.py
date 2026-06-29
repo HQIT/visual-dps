@@ -33,6 +33,7 @@ from core.config import load_app_config
 from core.state import STATE
 from services.camera_service import normalize_rtsp_url
 from services.inference_backends import resolve_backend_name
+from services.inference_backends.model_registry import resolve_det_variant
 from services.inference_service import InferenceService
 
 
@@ -71,6 +72,7 @@ _STATUS_PRESERVE_KEYS = (
     "collisions",
     "alarm_collisions",
     "backend",
+    "rtm_det",
     "skeletons",
     "infer_width",
     "infer_height",
@@ -115,6 +117,7 @@ async def _run_worker():
     app_config = load_app_config()
     _apply_inference_env_overrides(app_config)
     backend = resolve_backend_name(app_config)
+    rtm_det = resolve_det_variant(app_config)
     base_dir = app_config["paths"]["base_localdata_dir"]
     json_path = os.environ.get("INFERENCE_JSON_PATH", "").strip() or app_config["paths"]["default_json_file"]
 
@@ -131,7 +134,7 @@ async def _run_worker():
         camera_id,
         "starting",
         f"正在加载模型（{backend}）…",
-        {"stream_url": stream_url, "json_path": json_path, "backend": backend},
+        {"stream_url": stream_url, "json_path": json_path, "backend": backend, "rtm_det": rtm_det},
     )
 
     service = InferenceService(app_config, STATE)

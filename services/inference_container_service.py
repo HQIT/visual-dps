@@ -157,6 +157,7 @@ def _compose_inference_status(
         "updated_at": worker.get("updated_at"),
         "stream_url": worker.get("stream_url", ""),
         "backend": worker.get("backend", ""),
+        "rtm_det": worker.get("rtm_det", ""),
     }
 
     if container is None:
@@ -392,6 +393,8 @@ def start_inference_container(camera: dict, request=None) -> dict:
         "POSE_STREAM_GROUP": os.environ.get("POSE_STREAM_GROUP", "event-workers"),
         "POSE_STREAM_MAXLEN": os.environ.get("POSE_STREAM_MAXLEN", "2000"),
     }
+    tz = os.environ.get("TZ", "Asia/Shanghai").strip() or "Asia/Shanghai"
+    env["TZ"] = tz
     if preset.family == BACKEND_RTMPOSE_ONNX:
         env["INFERENCE_RTM_DET"] = resolve_det_variant(app_config, overrides=effective)
     if use_gpu:
@@ -479,6 +482,7 @@ def start_inference_container(camera: dict, request=None) -> dict:
                 "updated_at": time.time(),
                 "stream_url": stream_url,
                 "backend": preset.id,
+                "rtm_det": resolve_det_variant(app_config, overrides=effective),
             },
             f,
             ensure_ascii=False,

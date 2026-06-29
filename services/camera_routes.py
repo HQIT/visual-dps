@@ -28,6 +28,8 @@ from services.camera_store import (
     update_camera,
 )
 from services.inference_container_service import (
+    batch_start_inference_containers,
+    batch_stop_inference_containers,
     get_inference_status,
     start_inference_container,
     stop_inference_container,
@@ -253,6 +255,18 @@ def register_camera_routes(
     async def stop_camera_inference(camera_id: str, request: Request):
         result = stop_inference_container(camera_id, request=request)
         audit_from_result(request, "inference.stop", "camera", camera_id, result)
+        return result
+
+    @router.post("/inference/start-all")
+    async def start_all_inference(request: Request):
+        result = batch_start_inference_containers(camera_ips_file, request=request)
+        audit_from_result(request, "inference.start_all", "system", "", result)
+        return result
+
+    @router.post("/inference/stop-all")
+    async def stop_all_inference(request: Request):
+        result = batch_stop_inference_containers(camera_ips_file, request=request)
+        audit_from_result(request, "inference.stop_all", "system", "", result)
         return result
 
     @router.post("/mediamtx/apply")

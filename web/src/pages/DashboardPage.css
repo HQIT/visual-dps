@@ -17,6 +17,38 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  align-items: center;
+}
+
+.dashboard-page .toolbar-actions .btn-batch {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 6px;
+  border: 1px solid #00b894;
+  background: rgba(0, 212, 170, 0.12);
+  color: #00d4aa;
+  font-size: 0.82rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.dashboard-page .toolbar-actions .btn-batch:hover:not(:disabled) {
+  background: rgba(0, 212, 170, 0.22);
+}
+
+.dashboard-page .toolbar-actions .btn-batch-stop {
+  border-color: #c0392b;
+  background: rgba(192, 57, 43, 0.12);
+  color: #ff8a80;
+}
+
+.dashboard-page .toolbar-actions .btn-batch-stop:hover:not(:disabled) {
+  background: rgba(192, 57, 43, 0.22);
+}
+
+.dashboard-page .toolbar-actions .btn-batch:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .dashboard-page .toolbar-actions .btn-icon {

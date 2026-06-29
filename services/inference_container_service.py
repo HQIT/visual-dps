@@ -533,3 +533,95 @@ def stop_inference_container(camera_id: str, request=None) -> dict:
     return {"status": "success", "inference": get_inference_status(camera_id)}
 
 
+def batch_start_inference_containers(camera_ips_file: str, request=None) -> dict:
+    """批量启动已启用且配置了流地址的摄像头推理容器。"""
+    from services.camera_store import load_cameras
+
+    cameras = load_cameras(camera_ips_file)
+    items: list[dict] = []
+    started = skipped = failed = 0
+
+    for cam in cameras:
+        camera_id = str(cam.get("id") or cam.get("path") or "").strip()
+        if not camera_id:
+            continue
+        if not cam.get("enabled", True):
+            items.append(
+                {"camera_id": camera_id, "status": "skipped", "message": "摄像头已禁用"}
+            )
+            skipped += 1
+            continue
+        if not str(cam.get("url") or "").strip():
+            items.append(
+                {"camera_id": camera_id, "status": "skipped", "message": "未配置视频流地址"}
+            )
+            skipped += 1
+            continue
+
+        result = start_inference_container(cam, request=request)
+        if result.get("error"):
+            items.append(
+                {"camera_id": camera_id, "status": "failed", "message": str(result["error"])}
+            )
+            failed += 1
+        elif str(result.get("message") or "") == "已在运行":
+            items.append({"camera_id": camera_id, "status": "skipped", "message": "已在运行"})
+            skipped += 1
+        else:
+            items.append(
+                {
+                    "camera_id": camera_id,
+                    "status": "success",
+                    "inference": result.get("inference"),
+                }
+            )
+            started += 1
+
+    return {
+        "status": "success",
+        "total": len(cameras),
+        "started": started,
+        "skipped": skipped,
+        "failed": failed,
+        "items": items,
+    }
+
+
+def batch_stop_inference_containers(camera_ips_file: str, request=None) -> dict:
+    """批量停止全部摄像头推理容器。"""
+    from services.camera_store import load_cameras
+
+    cameras = load_cameras(camera_ips_file)
+    items: list[dict] = []
+    stopped = skipped = failed = 0
+
+    for cam in cameras:
+        camera_id = str(cam.get("id") or cam.get("path") or "").strip()
+        if not camera_id:
+            continue
+        infer_status = str(get_inference_status(camera_id).get("status") or "stopped")
+        if infer_status not in ("running", "starting", "paused", "error"):
+            items.append({"camera_id": camera_id, "status": "skipped", "message": "未在运行"})
+            skipped += 1
+            continue
+
+        result = stop_inference_container(camera_id, request=request)
+        if result.get("error"):
+            items.append(
+                {"camera_id": camera_id, "status": "failed", "message": str(result["error"])}
+            )
+            failed += 1
+        else:
+            items.append({"camera_id": camera_id, "status": "success"})
+            stopped += 1
+
+    return {
+        "status": "success",
+        "total": len(cameras),
+        "stopped": stopped,
+        "skipped": skipped,
+        "failed": failed,
+        "items": items,
+    }
+
+

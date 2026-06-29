@@ -31,6 +31,7 @@ export default function DashboardPage() {
   const [msgErr, setMsgErr] = useState(false);
   const [refreshingId, setRefreshingId] = useState(null);
   const [inferLoadingId, setInferLoadingId] = useState(null);
+  const [batchInferAction, setBatchInferAction] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerMode, setDrawerMode] = useState('edit');
   const [setupCamera, setSetupCamera] = useState(null);
@@ -286,6 +287,60 @@ export default function DashboardPage() {
     }
   };
 
+  const startAllInference = async () => {
+    if (!window.confirm('确认启动全部已启用摄像头的智能检测？')) return;
+    setBatchInferAction('start');
+    setMsg('正在批量启动智能检测…');
+    setMsgErr(false);
+    try {
+      const data = await apiPost('/api/inference/start-all', {});
+      if (data.error) {
+        setMsg(formatUserError(data.error));
+        setMsgErr(true);
+        return;
+      }
+      const failed = Number(data.failed) || 0;
+      setMsg(
+        `批量启动完成：成功 ${data.started ?? 0} 路，跳过 ${data.skipped ?? 0} 路，失败 ${failed} 路`,
+      );
+      setMsgErr(failed > 0);
+      await loadCameras({ probe: false });
+    } catch (e) {
+      setMsg(formatUserError(e.message) || '批量启动失败');
+      setMsgErr(true);
+    } finally {
+      setBatchInferAction(null);
+    }
+  };
+
+  const stopAllInference = async () => {
+    if (!window.confirm('确认停止全部摄像头的智能检测？')) return;
+    setBatchInferAction('stop');
+    setMsg('正在批量停止智能检测…');
+    setMsgErr(false);
+    try {
+      const data = await apiPost('/api/inference/stop-all', {});
+      if (data.error) {
+        setMsg(formatUserError(data.error));
+        setMsgErr(true);
+        return;
+      }
+      const failed = Number(data.failed) || 0;
+      setMsg(
+        `批量停止完成：已停 ${data.stopped ?? 0} 路，跳过 ${data.skipped ?? 0} 路，失败 ${failed} 路`,
+      );
+      setMsgErr(failed > 0);
+      await loadCameras({ probe: false });
+    } catch (e) {
+      setMsg(formatUserError(e.message) || '批量停止失败');
+      setMsgErr(true);
+    } finally {
+      setBatchInferAction(null);
+    }
+  };
+
+  const batchInferBusy = Boolean(batchInferAction);
+
   const openMonitor = (cam) => {
     navigate(`/monitor?camera=${encodeURIComponent(cam.id)}`);
   };
@@ -315,6 +370,7 @@ export default function DashboardPage() {
   };
 
   const drawerActionLoading = inferLoadingId === setupCamera?.id || refreshingId === setupCamera?.id;
+  const inferToggleDisabled = Boolean(inferLoadingId) || batchInferBusy;
   const drawerCamera = setupCamera
     ? cameras.find((c) => c.id === setupCamera.id) || setupCamera
     : null;
@@ -329,6 +385,24 @@ export default function DashboardPage() {
             {probing && !listLoading ? ' · 正在探测在线状态' : ''}
           </span>
           <div className="toolbar-actions">
+            <button
+              type="button"
+              className="btn-batch"
+              title="启动全部已启用摄像头的智能检测"
+              disabled={batchInferBusy || listLoading || !cameras.length}
+              onClick={startAllInference}
+            >
+              {batchInferAction === 'start' ? '启动中…' : '全部启动检测'}
+            </button>
+            <button
+              type="button"
+              className="btn-batch btn-batch-stop"
+              title="停止全部摄像头的智能检测"
+              disabled={batchInferBusy || listLoading || !cameras.length}
+              onClick={stopAllInference}
+            >
+              {batchInferAction === 'stop' ? '停止中…' : '全部停止检测'}
+            </button>
             <button
               type="button"
               className="btn-icon btn-icon-primary"
@@ -389,7 +463,7 @@ export default function DashboardPage() {
                         cam.inference?.status === 'starting'
                       }
                       loading={inferLoadingId === cam.id}
-                      disabled={inferLoadingId === cam.id}
+                      disabled={inferToggleDisabled}
                       title={
                         cam.inference?.status === 'running' || cam.inference?.status === 'starting'
                           ? '关闭智能检测'

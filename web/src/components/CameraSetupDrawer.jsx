@@ -4,7 +4,9 @@ import {
   CAMERA_OVERRIDE_FIELDS,
   DEFAULT_RTM_DET,
   formatSettingDisplayValue,
+  settingsFieldTooltip,
 } from '../lib/cameraSettings';
+import FieldHint from './FieldHint';
 import {
   CAMERA_SOURCE_TYPES,
   DEFAULT_SOURCE_TYPE,
@@ -320,7 +322,10 @@ export default function CameraSetupDrawer({
                       className={`drawer-param-card${customized ? ' is-custom' : ''}${isWide ? ' drawer-param-card--wide' : ''}`}
                     >
                       <div className="drawer-param-top">
-                        <span className="drawer-param-label">{field.label}</span>
+                        <span className="drawer-param-label">
+                          {field.label}
+                          <FieldHint text={settingsFieldTooltip(field)} />
+                        </span>
                         <label className="drawer-param-custom">
                           <input
                             type="checkbox"
@@ -375,7 +380,6 @@ export default function CameraSetupDrawer({
                         <span className="drawer-param-default">
                           全局默认 <strong>{displayGlobal}</strong>
                         </span>
-                        {field.hint ? <p className="drawer-param-hint">{field.hint}</p> : null}
                       </div>
                     </div>
                   );

@@ -3,12 +3,15 @@ import {
   RTMDET_OPTIONS,
   RTMPOSE_BACKEND_OPTIONS,
   YOLO_BACKEND_OPTIONS,
+  INFERENCE_MODEL_FIELD_HINTS,
   backendShortLabel,
   detShortLabel,
   isRtmposeBackend,
   normalizeBackendId,
   normalizeDetId,
+  settingsFieldTooltip,
 } from '../lib/cameraSettings';
+import FieldHint from './FieldHint';
 import './InferenceModelFields.css';
 
 /** 全局设置页：双下拉（RTMPose 时显示 det） */
@@ -20,7 +23,10 @@ export function InferenceModelGlobalFields({ backend, det, onBackendChange, onDe
   return (
     <div className="inference-model-fields">
       <label>
-        <span className="settings-field-label">姿态模型</span>
+        <span className="settings-field-label">
+          姿态模型
+          <FieldHint text={settingsFieldTooltip(INFERENCE_MODEL_FIELD_HINTS.backend)} />
+        </span>
         <select value={backendVal} onChange={(e) => onBackendChange(e.target.value)}>
           <optgroup label="RTMPose（top-down，需检测器）">
             {RTMPOSE_BACKEND_OPTIONS.map((opt) => (
@@ -40,7 +46,10 @@ export function InferenceModelGlobalFields({ backend, det, onBackendChange, onDe
       </label>
       {showDet ? (
         <label>
-          <span className="settings-field-label">人体检测 (RTMDet)</span>
+          <span className="settings-field-label">
+            人体检测 (RTMDet)
+            <FieldHint text={settingsFieldTooltip(INFERENCE_MODEL_FIELD_HINTS.det)} />
+          </span>
           <select value={detVal} onChange={(e) => onDetChange(e.target.value)}>
             {RTMDET_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
@@ -50,11 +59,6 @@ export function InferenceModelGlobalFields({ backend, det, onBackendChange, onDe
           </select>
         </label>
       ) : null}
-      <p className="inference-model-hint">
-        {showDet
-          ? 'RTMPose 为 top-down 流程：先 RTMDet 检人，再 RTMPose 估姿态。修改后需重新启动智能检测。'
-          : 'YOLO26-pose 为 bottom-up 端到端模型，无需单独选择检测器。修改后需重新启动智能检测。'}
-      </p>
     </div>
   );
 }
@@ -94,7 +98,17 @@ export function InferenceModelOverrideCard({
       className={`drawer-param-card inference-model-card${customized ? ' is-custom' : ''} drawer-param-card--wide`}
     >
       <div className="drawer-param-top">
-        <span className="drawer-param-label">推理模型</span>
+        <span className="drawer-param-label">
+          推理模型
+          <FieldHint
+            text={[
+              settingsFieldTooltip(INFERENCE_MODEL_FIELD_HINTS.backend),
+              showDet ? settingsFieldTooltip(INFERENCE_MODEL_FIELD_HINTS.det) : '',
+            ]
+              .filter(Boolean)
+              .join('\n\n')}
+          />
+        </span>
         <label className="drawer-param-custom">
           <input
             type="checkbox"
@@ -153,7 +167,7 @@ export function InferenceModelOverrideCard({
           全局默认 <strong>{globalLabel}</strong>
         </span>
         <p className="drawer-param-hint">
-          RTMPose 需 lite / lite-gpu-onnx 镜像；YOLO 需含 ultralytics 的 GPU 镜像。保存后请重新启动该路智能检测。
+          RTMPose 需 lite / lite-gpu-onnx 镜像；YOLO 需含 ultralytics 的 GPU 镜像。
         </p>
       </div>
     </div>

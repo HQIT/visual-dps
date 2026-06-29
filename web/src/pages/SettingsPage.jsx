@@ -5,7 +5,7 @@ import LogsPanel from '../components/LogsPanel';
 import ConfirmDialog from '../components/ConfirmDialog';
 import UserDrawer from '../components/UserDrawer';
 import FieldHint from '../components/FieldHint';
-import { CAMERA_OVERRIDE_FIELDS } from '../lib/cameraSettings';
+import { CAMERA_OVERRIDE_FIELDS, GLOBAL_COLLISION_FIELDS, settingsFieldTooltip } from '../lib/cameraSettings';
 import { InferenceModelGlobalFields } from '../components/InferenceModelFields';
 import { formatUserError } from '../lib/userFacingText';
 import './SettingsPage.css';
@@ -287,7 +287,7 @@ export default function SettingsPage() {
                 <label key={field.key}>
                   <span className="settings-field-label">
                     {field.label}
-                    {field.hint ? <FieldHint text={field.hint} /> : null}
+                    <FieldHint text={settingsFieldTooltip(field)} />
                   </span>
                   {field.type === 'boolean' ? (
                     <span className="settings-toggle-field">
@@ -329,6 +329,27 @@ export default function SettingsPage() {
                       }
                     />
                   )}
+                </label>
+              ))}
+              <h3 className="settings-subsection-title">碰撞告警</h3>
+              {GLOBAL_COLLISION_FIELDS.map((field) => (
+                <label key={field.key}>
+                  <span className="settings-field-label">
+                    {field.label}
+                    <FieldHint text={settingsFieldTooltip(field)} />
+                  </span>
+                  <input
+                    type="number"
+                    min={field.min}
+                    max={field.max}
+                    value={settings[field.key] ?? ''}
+                    onChange={(e) =>
+                      setSettings((s) => ({
+                        ...s,
+                        [field.key]: Number(e.target.value),
+                      }))
+                    }
+                  />
                 </label>
               ))}
             </div>

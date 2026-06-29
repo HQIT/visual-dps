@@ -23,8 +23,18 @@ PUBLIC_KEYS = {
     "inference.frame_rate": ("inference", "frame_rate", int),
     "inference.height": ("inference", "height", int),
     "inference.pose_frame_interval": ("inference", "pose_frame_interval", int),
+    "inference.alarm_min_consecutive_frames": ("inference", "alarm_min_consecutive_frames", int),
+    "inference.alarm_cooldown_frames": ("inference", "alarm_cooldown_frames", int),
     "debug-info.enabled": ("debug-info", "enabled", bool),
 }
+
+# 仅全局设置页暴露，event-worker 读取；不支持按摄像头覆盖
+GLOBAL_ONLY_KEYS = frozenset(
+    {
+        "inference.alarm_min_consecutive_frames",
+        "inference.alarm_cooldown_frames",
+    }
+)
 
 # 单路摄像头可覆盖的全局项（不含 source.stream_url，流地址用摄像头 url 字段）
 CAMERA_OVERRIDE_KEYS = {
@@ -70,11 +80,46 @@ def _normalize_backend(raw: Any) -> str:
     return normalize_backend_setting(val)
 
 
+def _coerce_alarm_min(raw: Any) -> int:
+    val = int(raw)
+    if val < 1:
+        raise ValueError("must be >= 1")
+    return val
+
+
+def _coerce_alarm_cooldown(raw: Any) -> int:
+    val = int(raw)
+    if val < 0:
+        raise ValueError("must be >= 0")
+    return val
+
+
+def _resolve_alarm_cooldown(cfg: dict) -> int:
+    infer = cfg.get("inference")
+    if isinstance(infer, dict) and "alarm_cooldown_frames" in infer:
+        return max(0, int(infer["alarm_cooldown_frames"]))
+    return 12
+
+
+def get_merged_inference_section(app_config: dict | None = None, path: str = DEFAULT_PATH) -> dict:
+    """app_config.inference 与 runtime 覆盖合并（供 event-worker 读取告警门控）。"""
+    base_infer = dict((app_config or {}).get("inference") or {})
+    overlay = _load_json(path)
+    overlay_infer = overlay.get("inference")
+    if isinstance(overlay_infer, dict):
+        base_infer.update(overlay_infer)
+    return base_infer
+
+
 def _coerce_setting_value(pub_key: str, raw: Any, typ: type) -> Any:
     if pub_key == "models.backend":
         return _normalize_backend(raw)
     if pub_key == "models.det":
         return normalize_det_setting(str(raw))
+    if pub_key == "inference.alarm_min_consecutive_frames":
+        return _coerce_alarm_min(raw)
+    if pub_key == "inference.alarm_cooldown_frames":
+        return _coerce_alarm_cooldown(raw)
     if typ is bool:
         if isinstance(raw, bool):
             return raw
@@ -142,6 +187,11 @@ def get_public_settings(app_config: dict | None, path: str = DEFAULT_PATH) -> di
             "inference.frame_rate": _deep_get(merged, "inference", "frame_rate", 15),
             "inference.height": _deep_get(merged, "inference", "height", 480),
             "inference.pose_frame_interval": _deep_get(merged, "inference", "pose_frame_interval", 3),
+            "inference.alarm_min_consecutive_frames": max(
+                1,
+                int(_deep_get(merged, "inference", "alarm_min_consecutive_frames", 3) or 3),
+            ),
+            "inference.alarm_cooldown_frames": _resolve_alarm_cooldown(merged),
             "debug-info.enabled": bool(_deep_get(merged, "debug-info", "enabled", False)),
         },
     }
@@ -160,11 +210,15 @@ def patch_public_settings(updates: dict, path: str = DEFAULT_PATH) -> dict:
                 val = _normalize_backend(raw)
             elif pub_key == "models.det":
                 val = normalize_det_setting(str(raw))
+            elif pub_key == "inference.alarm_min_consecutive_frames":
+                val = _coerce_alarm_min(raw)
+            elif pub_key == "inference.alarm_cooldown_frames":
+                val = _coerce_alarm_cooldown(raw)
             elif typ is bool:
                 val = bool(raw) if not isinstance(raw, str) else raw.lower() in ("1", "true", "yes", "on")
             elif typ is int:
                 val = int(raw)
-                if val <= 0 and pub_key != "debug-info.enabled":
+                if val <= 0:
                     raise ValueError("must be positive")
             else:
                 val = str(raw).strip()

@@ -29,6 +29,18 @@ export const DEFAULT_RTM_DET = 'nano';
 /** 不参与通用字段循环渲染的推理模型键 */
 export const INFERENCE_MODEL_SETTING_KEYS = ['models.backend', 'models.det'];
 
+/** 推理模型字段说明（问号 tooltip） */
+export const INFERENCE_MODEL_FIELD_HINTS = {
+  backend: {
+    hint: 'RTMPose 为 top-down（先检人再估姿态）；YOLO26-pose 为 bottom-up 端到端。',
+    effectHint: '保存后需对该路摄像头重新「启动智能检测」（重建 visual-dps-infer-{摄像头ID} 推理容器）。',
+  },
+  det: {
+    hint: '仅 RTMPose 流程使用；nano 更快，M 精度更高。',
+    effectHint: '保存后需对该路摄像头重新「启动智能检测」（重建 visual-dps-infer-{摄像头ID} 推理容器）。',
+  },
+};
+
 export const CAMERA_OVERRIDE_FIELDS = [
   {
     key: 'inference.frame_rate',
@@ -36,16 +48,68 @@ export const CAMERA_OVERRIDE_FIELDS = [
     type: 'number',
     min: 1,
     max: 60,
+    hint: '推理主循环目标帧率；实际 fps 受模型耗时限制。',
+    effectHint: '保存后需重新「启动智能检测」（visual-dps-infer-{摄像头ID} 推理容器）。',
   },
-  { key: 'inference.height', label: '推理高度 (px)', type: 'number', min: 120, max: 2160 },
-  { key: 'inference.pose_frame_interval', label: '姿态检测间隔 (帧)', type: 'number', min: 1, max: 120 },
+  {
+    key: 'inference.height',
+    label: '推理高度 (px)',
+    type: 'number',
+    min: 120,
+    max: 2160,
+    hint: '推理与标注缩放基准高度，影响精度与负载。',
+    effectHint: '保存后需重新「启动智能检测」（visual-dps-infer-{摄像头ID} 推理容器）。',
+  },
+  {
+    key: 'inference.pose_frame_interval',
+    label: '姿态检测间隔 (帧)',
+    type: 'number',
+    min: 1,
+    max: 120,
+    hint: '每隔 N 帧做一次姿态推理；越大负载越低、碰撞采样越稀疏。',
+    effectHint: '保存后需重新「启动智能检测」（visual-dps-infer-{摄像头ID} 推理容器）。',
+  },
   {
     key: 'debug-info.enabled',
     label: '推理调试日志',
     type: 'boolean',
     hint: '开启后推理容器周期性输出 [DEBUG-INFO]（帧率、资源等）。不影响监控页画面与骨架叠加，生产环境建议关闭。',
+    effectHint: '保存后需重新「启动智能检测」（visual-dps-infer-{摄像头ID} 推理容器）。',
   },
 ];
+
+/** 仅全局设置页：碰撞告警门控（event-worker 读取） */
+export const GLOBAL_COLLISION_FIELDS = [
+  {
+    key: 'inference.alarm_min_consecutive_frames',
+    label: '告警连续命中帧数',
+    type: 'number',
+    min: 1,
+    max: 120,
+    hint: '同一货位手腕连续命中多少帧才从碰撞（黄）升为告警（红）并触发回调。',
+    effectHint:
+      '保存后 visual-dps-event-worker 会自动读取 localdata/runtime_config.json；若未生效请执行 docker restart visual-dps-event-worker。',
+  },
+  {
+    key: 'inference.alarm_cooldown_frames',
+    label: '告警冷却帧数',
+    type: 'number',
+    min: 0,
+    max: 600,
+    hint: '同一货位两次告警之间的最小帧间隔；0 表示不冷却。',
+    effectHint:
+      '保存后 visual-dps-event-worker 会自动读取 localdata/runtime_config.json；若未生效请执行 docker restart visual-dps-event-worker。',
+  },
+];
+
+/** 合并 hint 与生效说明，供 FieldHint 展示 */
+export function settingsFieldTooltip(field) {
+  if (!field) return '';
+  const lines = [];
+  if (field.hint) lines.push(field.hint);
+  if (field.effectHint) lines.push(`生效：${field.effectHint}`);
+  return lines.join('\n\n');
+}
 
 /** 旧配置 / 族 id → 当前 preset id（与 model_registry._ALIASES 对齐） */
 const BACKEND_ALIASES = {

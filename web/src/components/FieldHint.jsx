@@ -11,7 +11,7 @@ export default function FieldHint({ text, className = '' }) {
       aria-label={text}
     >
       <span className="field-hint-info-icon" aria-hidden="true">
-        i
+        ?
       </span>
       <span className="field-hint-info-tooltip" role="tooltip">
         {text}

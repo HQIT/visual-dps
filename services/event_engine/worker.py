@@ -25,6 +25,7 @@ from services.pose_bus import (
     pose_delivery_mode,
     redis_url,
 )
+from services.runtime_config_service import DEFAULT_PATH, get_merged_inference_section
 
 logger = logging.getLogger(__name__)
 
@@ -83,13 +84,18 @@ class EventRedisWorker:
             os.environ.get("JSON_DIR", "").strip()
             or str(app_config.get("paths", {}).get("json_dir", "localdata/json"))
         )
-        infer_cfg = app_config.get("inference", {}) or {}
-        self._alarm_min = max(1, int(infer_cfg.get("alarm_min_consecutive_frames", 3) or 3))
-        if "alarm_cooldown_frames" in infer_cfg:
-            self._alarm_cooldown = max(0, int(infer_cfg["alarm_cooldown_frames"]))
-        else:
-            self._alarm_cooldown = 12
-        self._video_fps = float(infer_cfg.get("frame_rate", 15) or 15)
+        self._runtime_config_path = os.environ.get("RUNTIME_CONFIG_FILE", DEFAULT_PATH)
+        self._alarm_settings_mtime: float | None = None
+        infer_cfg = get_merged_inference_section(app_config, self._runtime_config_path)
+        self._apply_alarm_settings(infer_cfg)
+        try:
+            self._alarm_settings_mtime = (
+                os.path.getmtime(self._runtime_config_path)
+                if os.path.isfile(self._runtime_config_path)
+                else 0.0
+            )
+        except OSError:
+            self._alarm_settings_mtime = 0.0
         self._delivery = pose_delivery_mode()
         self._shard_count, self._shard_index = shard_config()
         self._consumer_name = default_consumer_name()
@@ -97,6 +103,33 @@ class EventRedisWorker:
         self._listener_task: asyncio.Task | None = None
         self._redis: aioredis.Redis | None = None
         self._pubsub: aioredis.client.PubSub | None = None
+
+    def _apply_alarm_settings(self, infer_cfg: dict) -> None:
+        self._alarm_min = max(1, int(infer_cfg.get("alarm_min_consecutive_frames", 3) or 3))
+        if "alarm_cooldown_frames" in infer_cfg:
+            self._alarm_cooldown = max(0, int(infer_cfg["alarm_cooldown_frames"]))
+        else:
+            self._alarm_cooldown = 12
+        self._video_fps = float(infer_cfg.get("frame_rate", 15) or 15)
+        for ctx in self._contexts.values():
+            proc = ctx.processor
+            if proc is None:
+                continue
+            proc.alarm_min_consecutive_frames = self._alarm_min
+            proc.alarm_cooldown_frames = self._alarm_cooldown
+            proc.video_fps = self._video_fps
+
+    def _refresh_alarm_settings_if_needed(self) -> None:
+        path = self._runtime_config_path
+        try:
+            mtime = os.path.getmtime(path) if os.path.isfile(path) else 0.0
+        except OSError:
+            mtime = 0.0
+        if self._alarm_settings_mtime == mtime:
+            return
+        self._alarm_settings_mtime = mtime
+        infer_cfg = get_merged_inference_section(self.app_config, path)
+        self._apply_alarm_settings(infer_cfg)
 
     def _resolve_json_path(self, camera_id: str) -> str:
         rel = camera_annotation_path(self._json_dir, camera_id)
@@ -112,6 +145,7 @@ class EventRedisWorker:
         return rel
 
     def _get_processor(self, camera_id: str, infer_w: int, infer_h: int) -> CollisionProcessor | None:
+        self._refresh_alarm_settings_if_needed()
         json_path = self._resolve_json_path(camera_id)
         ctx = self._contexts.get(camera_id)
         mtime = os.path.getmtime(json_path) if os.path.isfile(json_path) else 0.0

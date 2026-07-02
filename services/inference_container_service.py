@@ -358,6 +358,7 @@ def start_inference_container(camera: dict, request=None) -> dict:
         binds.append(_host_bind("core/config.py", read_only=True))
         for rel in (
             "inference_worker.py",
+            "services/inference_service.py",
             "services/hwaccel_probe.py",
             "services/nvidia_pip_cuda.py",
             "services/rtsp_capture.py",

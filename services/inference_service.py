@@ -422,11 +422,9 @@ class InferenceService:
                     await websocket.send_json(payload)
 
                 elapsed_loop = time.monotonic() - loop_started_at
-                if headless_stream and run_pose:
-                    pose_period = frame_period_sec * pose_frame_interval
-                    sleep_sec = pose_period - elapsed_loop
-                else:
-                    sleep_sec = frame_period_sec - elapsed_loop
+                # headless：降频由 skip tick 的 frame_period sleep 承担；pose tick 只睡 1 个 tick，
+                # 勿再乘 pose_frame_interval（否则与 skip sleep 双重 pacing）。
+                sleep_sec = frame_period_sec - elapsed_loop
                 if sleep_sec > 0:
                     await asyncio.sleep(sleep_sec)
 

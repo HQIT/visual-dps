@@ -160,14 +160,17 @@ async def _run_worker():
         {"stream_url": stream_url, "started_at": time.time()},
     )
 
+    wrote_final = False
     while not stopping:
         if service._background_task and service._background_task.done():
             exc = service._background_task.exception()
             if exc:
                 write_status(base_dir, camera_id, "error", str(exc))
+                wrote_final = True
                 break
             if not STATE.is_inferencing:
                 write_status(base_dir, camera_id, "stopped", "推理任务已结束")
+                wrote_final = True
                 break
         write_status(
             base_dir,
@@ -178,10 +181,11 @@ async def _run_worker():
         )
         await asyncio.sleep(3)
 
-    if not stopping:
-        write_status(base_dir, camera_id, "stopped", "正常退出")
-    else:
-        write_status(base_dir, camera_id, "stopped", "收到停止信号")
+    if not wrote_final:
+        if stopping:
+            write_status(base_dir, camera_id, "stopped", "收到停止信号")
+        else:
+            write_status(base_dir, camera_id, "stopped", "正常退出")
 
 
 def main():

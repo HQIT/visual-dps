@@ -367,6 +367,7 @@ def start_inference_container(camera: dict, request=None) -> dict:
             "services/inference_backends/rtmpose_onnx_backend.py",
             "services/pipeline_latency.py",
             "services/pipeline_latency_log.py",
+            "services/pose_bus.py",
         ):
             binds.append(_host_bind(rel, read_only=True))
     effective = get_effective_settings(app_config, camera)

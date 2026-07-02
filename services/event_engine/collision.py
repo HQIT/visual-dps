@@ -74,6 +74,13 @@ class CollisionProcessor:
         self._box_consecutive_hits: dict[str, int] = {}
         self._box_last_alarm_frame: dict[str, int] = {}
 
+    def reset_infer_session(self) -> None:
+        """infer 重启导致 frame_idx 回绕时清空会话内状态。"""
+        self._box_consecutive_hits.clear()
+        self._box_last_alarm_frame.clear()
+        self.person_assigner.tracks.clear()
+        self.person_assigner.next_id = 1
+
     def process(self, pose_frame: dict) -> dict:
         """返回 collisions、alarm_collisions、带 track 的 skeletons（供 SSE 合并）。"""
         frame_idx = int(pose_frame.get("frame_idx") or 0)

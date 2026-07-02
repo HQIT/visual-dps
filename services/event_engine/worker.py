@@ -74,6 +74,7 @@ class _CameraContext:
         self.processor = processor
         self.infer_w = infer_w
         self.infer_h = infer_h
+        self.last_frame_idx = -1
 
 
 class EventRedisWorker:
@@ -176,6 +177,26 @@ class EventRedisWorker:
             self._contexts[camera_id] = ctx
 
         return ctx.processor
+
+    def _maybe_reset_on_frame_regression(
+        self,
+        camera_id: str,
+        ctx: _CameraContext,
+        frame_idx: int,
+    ) -> None:
+        """方案 A：frame_idx 回退视为 infer 重启，清空碰撞会话状态。"""
+        if ctx.last_frame_idx < 0 or frame_idx >= ctx.last_frame_idx:
+            return
+        proc = ctx.processor
+        if proc is None:
+            return
+        proc.reset_infer_session()
+        logger.info(
+            "event worker: infer frame_idx regression camera=%s frame=%s last=%s; reset collision session",
+            camera_id,
+            frame_idx,
+            ctx.last_frame_idx,
+        )
 
     def _log_collisions(
         self,
@@ -331,9 +352,14 @@ class EventRedisWorker:
 
         infer_w = int(pose.get("infer_width") or 0)
         infer_h = int(pose.get("infer_height") or 0)
+        frame_idx = int(pose.get("frame_idx") or 0)
         processor = self._get_processor(camera_id, infer_w, infer_h)
-        if processor is None:
+        ctx = self._contexts.get(camera_id)
+        if processor is None or ctx is None:
             return
+
+        self._maybe_reset_on_frame_regression(camera_id, ctx, frame_idx)
+        ctx.last_frame_idx = frame_idx
 
         result = await asyncio.to_thread(processor.process, pose)
         frame_idx = int(result.get("frame_idx") or pose.get("frame_idx") or 0)

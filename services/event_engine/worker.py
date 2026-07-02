@@ -35,7 +35,7 @@ def _collision_log_enabled() -> bool:
 
 
 def _collision_log_wall_time() -> str:
-    """日志用标准本地时间：YYYY-MM-DD HH:MM:SS"""
+    """日志用标准本地时间：YYYY-MM-DD HH:MM:SS.mmm"""
     return wall_time_str()
 
 

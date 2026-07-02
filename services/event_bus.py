@@ -45,6 +45,7 @@ def build_event_frame(
     collisions: list,
     alarm_collisions: list,
     skeletons: list | None = None,
+    latency_trace: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     frame: dict[str, Any] = {
         "schema": EVENT_SCHEMA_VERSION,
@@ -57,6 +58,8 @@ def build_event_frame(
     }
     if skeletons is not None:
         frame["skeletons"] = list(skeletons)
+    if isinstance(latency_trace, dict) and latency_trace:
+        frame["latency_trace"] = latency_trace
     return frame
 
 
@@ -67,16 +70,23 @@ def publish_event_frame(
     collisions: list,
     alarm_collisions: list,
     skeletons: list | None = None,
+    latency_trace: dict[str, Any] | None = None,
 ) -> bool:
     cid = str(camera_id or "").strip()
     if not cid:
         return False
+    trace = latency_trace
+    if isinstance(trace, dict) and trace:
+        from services.pipeline_latency import stamp
+
+        stamp(trace, "event_published")
     frame = build_event_frame(
         camera_id=cid,
         frame_idx=frame_idx,
         collisions=collisions,
         alarm_collisions=alarm_collisions,
         skeletons=skeletons,
+        latency_trace=trace,
     )
     payload = json.dumps(frame, ensure_ascii=False, separators=(",", ":"))
     try:

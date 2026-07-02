@@ -295,14 +295,17 @@ class InferenceService:
                         await asyncio.sleep(sleep_skip)
                     continue
 
+                captured_at = 0.0
                 if is_stream:
-                    ret, frame, _captured_at = await asyncio.get_running_loop().run_in_executor(
+                    ret, frame, captured_at = await asyncio.get_running_loop().run_in_executor(
                         self._executor, _snapshot_stream_frame, cap
                     )
                 else:
                     ret, frame = await asyncio.get_running_loop().run_in_executor(
                         self._executor, cap.read
                     )
+                    if ret and frame is not None:
+                        captured_at = time.time()
 
                 inference_tick += 1
 
@@ -323,11 +326,31 @@ class InferenceService:
                 else:
                     raw_frame = frame
 
+                latency_trace = None
+                if run_pose and inference_camera_id:
+                    from services.pipeline_latency import new_trace, sample_hit, set_captured_at, stamp
+
+                    if sample_hit(frame_count):
+                        latency_trace = new_trace(
+                            inference_camera_id,
+                            frame_count,
+                            run_id=f"infer_{inference_camera_id}",
+                        )
+                        set_captured_at(latency_trace, captured_at)
+                        stamp(latency_trace, "infer_snap")
+
                 if run_pose or not headless_stream:
+                    if latency_trace is not None:
+                        stamp(latency_trace, "det_start")
                     cached_bboxes = await self._run_detection(raw_frame)
+                    if latency_trace is not None:
+                        stamp(latency_trace, "det_done")
 
                 if run_pose:
                     skeletons_data = []
+
+                    if latency_trace is not None:
+                        stamp(latency_trace, "pose_start")
 
                     if len(cached_bboxes) > 0:
                         pose_batch = await self._run_pose(raw_frame, cached_bboxes)
@@ -347,6 +370,9 @@ class InferenceService:
                                 "keypoints": person_pts,
                             })
 
+                    if latency_trace is not None:
+                        stamp(latency_trace, "pose_done")
+
                     cached_skeletons_data = skeletons_data
 
                     if is_null_ws and inference_camera_id:
@@ -358,6 +384,7 @@ class InferenceService:
                             persons=skeletons_data,
                             infer_width=infer_w,
                             infer_height=infer_h,
+                            latency_trace=latency_trace,
                         )
 
                 skeletons_data = cached_skeletons_data

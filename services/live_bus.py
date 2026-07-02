@@ -14,6 +14,13 @@ import redis as sync_redis
 import redis.asyncio as aioredis
 
 from services.event_bus import EVENT_CHANNEL_PREFIX, get_event_snapshot
+from services.pipeline_latency import (
+    build_live_trace,
+    compact_for_sse,
+    skeleton_source_for_merge,
+    sse_payload_enabled,
+)
+from services.pipeline_latency_log import append_jsonl
 from services.pose_bus import POSE_CHANNEL_PREFIX, get_pose_snapshot
 
 logger = logging.getLogger(__name__)
@@ -41,23 +48,27 @@ def merge_live_frame(pose: dict[str, Any] | None, event: dict[str, Any] | None) 
     pose_ts = float(pose.get("ts") or 0)
     event_ts = float(event.get("ts") or 0)
     ts = max(pose_ts, event_ts) or time.time()
-    pose_skeletons = list(pose.get("persons") or pose.get("skeletons") or [])
-    event_skeletons = list(event.get("skeletons") or [])
-    # 骨架坐标以推理姿态为准（最新帧）；event 可能滞后仍保留旧关键点导致「人不跟画」
-    if pose_skeletons and (pose_ts >= event_ts or not event_skeletons):
-        skeletons = pose_skeletons
-    else:
-        skeletons = event_skeletons or pose_skeletons
-    return {
+    skeletons, skeleton_source = skeleton_source_for_merge(pose, event)
+    frame_idx = int(pose.get("frame_idx") or event.get("frame_idx") or 0)
+    merged: dict[str, Any] = {
         "schema": LIVE_SCHEMA_VERSION,
         "ts": ts,
         "infer_width": int(pose.get("infer_width") or 0),
         "infer_height": int(pose.get("infer_height") or 0),
-        "frame_idx": int(pose.get("frame_idx") or event.get("frame_idx") or 0),
+        "frame_idx": frame_idx,
         "skeletons": list(skeletons),
         "collisions": list(event.get("collisions") or []),
         "alarm_collisions": list(event.get("alarm_collisions") or []),
     }
+    if skeleton_source != "none":
+        merged["skeleton_source"] = skeleton_source
+
+    live_trace = build_live_trace(pose, event)
+    if live_trace is not None:
+        append_jsonl(str(pose.get("camera_id") or event.get("camera_id") or ""), live_trace)
+        if sse_payload_enabled():
+            merged["latency_trace"] = compact_for_sse(live_trace)
+    return merged
 
 
 def get_snapshot(camera_id: str) -> dict[str, Any] | None:
@@ -161,7 +172,7 @@ class LiveHub:
                     else:
                         continue
 
-                    merged = merge_live_frame(pose, event)
+                    merged = await asyncio.to_thread(merge_live_frame, pose, event)
                     out = json.dumps(merged, ensure_ascii=False, separators=(",", ":"))
                     await self._broadcast(camera_id, out)
             except asyncio.CancelledError:

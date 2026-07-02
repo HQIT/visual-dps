@@ -48,8 +48,9 @@ def build_pose_frame(
     persons: list,
     infer_width: int,
     infer_height: int,
+    latency_trace: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    frame: dict[str, Any] = {
         "schema": POSE_SCHEMA_VERSION,
         "kind": "pose",
         "ts": time.time(),
@@ -59,6 +60,12 @@ def build_pose_frame(
         "infer_height": int(infer_height),
         "persons": list(persons),
     }
+    if isinstance(latency_trace, dict) and latency_trace:
+        frame["latency_trace"] = latency_trace
+        captured = (latency_trace.get("t") or {}).get("rtsp_captured")
+        if captured:
+            frame["captured_at"] = float(captured)
+    return frame
 
 
 def ensure_pose_stream_group(client: sync_redis.Redis | None = None) -> None:
@@ -83,16 +90,23 @@ def publish_pose_frame(
     persons: list,
     infer_width: int,
     infer_height: int,
+    latency_trace: dict[str, Any] | None = None,
 ) -> bool:
     cid = str(camera_id or "").strip()
     if not cid:
         return False
+    trace = latency_trace
+    if isinstance(trace, dict) and trace:
+        from services.pipeline_latency import stamp
+
+        stamp(trace, "pose_published")
     frame = build_pose_frame(
         camera_id=cid,
         frame_idx=frame_idx,
         persons=persons,
         infer_width=infer_width,
         infer_height=infer_height,
+        latency_trace=trace,
     )
     payload = json.dumps(frame, ensure_ascii=False, separators=(",", ":"))
     try:

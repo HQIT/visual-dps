@@ -191,6 +191,8 @@ class EventRedisWorker:
         vsec, vtext = _resolve_log_video_time(pose, self._video_fps)
         src = pose.get("source_mode") or "stream"
         lat = pose.get("latency_ms") or {}
+        if not lat and isinstance(pose.get("latency_trace"), dict):
+            lat = (pose.get("latency_trace") or {}).get("latency_ms") or {}
         wall_time = _collision_log_wall_time()
         prefix = f"[COLLISION][HIT] time={wall_time} camera={camera_id} source={src}"
         if run_id:
@@ -335,11 +337,20 @@ class EventRedisWorker:
         if processor is None:
             return
 
+        from services.pipeline_latency import extract_trace, stamp
+
+        latency_trace = extract_trace(pose)
+        if latency_trace is not None:
+            stamp(latency_trace, "worker_received")
+
         result = await asyncio.to_thread(processor.process, pose)
         frame_idx = int(result.get("frame_idx") or pose.get("frame_idx") or 0)
         collisions = result.get("collisions") or []
         alarm_collisions = result.get("alarm_collisions") or []
         skeletons = result.get("skeletons")
+
+        if latency_trace is not None:
+            stamp(latency_trace, "worker_done")
 
         self._log_collisions(pose, collisions, alarm_collisions)
 
@@ -350,6 +361,7 @@ class EventRedisWorker:
             collisions=collisions,
             alarm_collisions=alarm_collisions,
             skeletons=skeletons,
+            latency_trace=latency_trace,
         )
 
         if self.callback_reporter and alarm_collisions:

@@ -358,12 +358,15 @@ def start_inference_container(camera: dict, request=None) -> dict:
         binds.append(_host_bind("core/config.py", read_only=True))
         for rel in (
             "inference_worker.py",
+            "services/inference_service.py",
             "services/hwaccel_probe.py",
             "services/nvidia_pip_cuda.py",
             "services/rtsp_capture.py",
             "services/inference_backends/__init__.py",
             "services/inference_backends/model_registry.py",
             "services/inference_backends/rtmpose_onnx_backend.py",
+            "services/pipeline_latency.py",
+            "services/pipeline_latency_log.py",
         ):
             binds.append(_host_bind(rel, read_only=True))
     effective = get_effective_settings(app_config, camera)
@@ -393,6 +396,17 @@ def start_inference_container(camera: dict, request=None) -> dict:
         "POSE_STREAM_GROUP": os.environ.get("POSE_STREAM_GROUP", "event-workers"),
         "POSE_STREAM_MAXLEN": os.environ.get("POSE_STREAM_MAXLEN", "2000"),
     }
+    for latency_key in (
+        "PIPELINE_LATENCY_TRACE",
+        "PIPELINE_LATENCY_SAMPLE",
+        "PIPELINE_LATENCY_LOG_DIR",
+        "PIPELINE_LATENCY_SSE_PAYLOAD",
+        "PIPELINE_LATENCY_LOG_STDERR",
+        "PIPELINE_LATENCY_STDERR_EVERY",
+    ):
+        latency_val = os.environ.get(latency_key, "").strip()
+        if latency_val:
+            env[latency_key] = latency_val
     tz = os.environ.get("TZ", "Asia/Shanghai").strip() or "Asia/Shanghai"
     env["TZ"] = tz
     if preset.family == BACKEND_RTMPOSE_ONNX:

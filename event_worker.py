@@ -33,6 +33,9 @@ async def _run():
         print(f"ℹ️ Event worker 已启动 delivery=pubsub ({shard_label()}) id={instance_id or 'local'}")
     if os.environ.get("COLLISION_LOG", "").strip().lower() in ("1", "true", "yes", "on"):
         print("ℹ️ 碰撞终端日志已开启 COLLISION_LOG=1（每帧 HIT + 告警 ALARM）")
+    if os.environ.get("PIPELINE_LATENCY_TRACE", "").strip().lower() in ("1", "true", "yes", "on"):
+        log_dir = os.environ.get("PIPELINE_LATENCY_LOG_DIR", "/app/localdata/logs/latency")
+        print(f"ℹ️ 全链路延迟追踪已开启 PIPELINE_LATENCY_TRACE=1 log_dir={log_dir}")
 
     stopping = False
 

@@ -7,8 +7,9 @@ from datetime import datetime
 
 
 def wall_time_str() -> str:
-    """本地时间 YYYY-MM-DD HH:MM:SS（与 event-worker 碰撞日志一致）。"""
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    """本地时间 YYYY-MM-DD HH:MM:SS.mmm（碰撞/回调日志墙钟）。"""
+    now = datetime.now()
+    return now.strftime("%Y-%m-%d %H:%M:%S") + f".{now.microsecond // 1000:03d}"
 
 
 def epoch_ms() -> int:

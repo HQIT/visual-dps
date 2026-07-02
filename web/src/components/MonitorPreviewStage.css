@@ -97,6 +97,11 @@
   pointer-events: none;
 }
 
+.monitor-media-fit-inner.is-overlay-only {
+  background: #0a1014;
+  border: 1px dashed #2b3a45;
+}
+
 .monitor-stage-media-fit {
   display: block;
   width: 100%;

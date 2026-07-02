@@ -125,6 +125,11 @@
   color: #c5d4e0;
 }
 
+.monitor-layer-switch.is-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .monitor-chips .chip-ok {
   color: #2ecc71;
   border-color: #1e4d3a;

@@ -215,6 +215,7 @@ export default function MonitorPreviewStage({
   liveSkeletons = [],
   liveInferWidth = 0,
   liveInferHeight = 0,
+  showVideoLayer = false,
   showSkeletonLayer = true,
   showRoiLayer = true,
   busy = false,
@@ -248,9 +249,15 @@ export default function MonitorPreviewStage({
   }, [cameraId, playback]);
 
   const { format, height } = streamPrefs;
-  const mjpegSrc = cameraId && format === 'mjpeg' ? cameraStreamUrl(cameraId, height) : '';
+  const previewEnabled = Boolean(showVideoLayer && (cameraId || imageSrc));
+  const mjpegSrc =
+    previewEnabled && cameraId && format === 'mjpeg' ? cameraStreamUrl(cameraId, height) : '';
   const showVideo = format === 'hls' || format === 'webrtc';
-  const hasMedia = showVideo || mjpegSrc || imageSrc;
+  const hasMedia = previewEnabled && (showVideo || mjpegSrc || imageSrc);
+  const overlayOnlyMode =
+    !previewEnabled && !annotateMode && (showSkeletonLayer || showRoiLayer);
+  const showStageContent = hasMedia || overlayOnlyMode;
+  const stageEmptyText = !showVideoLayer ? '画面已关闭' : emptyText;
 
   const { streamError } = usePreviewStream({
     format,
@@ -258,7 +265,7 @@ export default function MonitorPreviewStage({
     mjpegSrc,
     videoRef,
     imgRef,
-    enabled: Boolean(cameraId || imageSrc),
+    enabled: previewEnabled,
   });
 
   const hitSet = useMemo(() => new Set(hits), [hits]);
@@ -266,42 +273,68 @@ export default function MonitorPreviewStage({
 
   const updateLayout = useCallback(() => {
     const stage = stageRef.current;
-    const el = showVideo ? videoRef.current : imgRef.current;
-    if (!stage || !el) return;
+    if (!stage) return;
 
-    const nw = el.videoWidth || el.naturalWidth || 0;
-    const nh = el.videoHeight || el.naturalHeight || 0;
-    if (!nw) return;
+    const applyFrame = (fw, fh, notifyFrameSize = true) => {
+      if (!fw || !fh) return;
+      setFrameSize({ w: fw, h: fh });
+      const nextLayout = computeContainLayout(stage.clientWidth, stage.clientHeight, fw, fh);
+      setLayout((prev) => {
+        if (
+          prev &&
+          prev.frameW === nextLayout.frameW &&
+          prev.frameH === nextLayout.frameH &&
+          prev.drawW === nextLayout.drawW &&
+          prev.drawH === nextLayout.drawH &&
+          prev.offsetX === nextLayout.offsetX &&
+          prev.offsetY === nextLayout.offsetY
+        ) {
+          return prev;
+        }
+        return nextLayout;
+      });
+      if (notifyFrameSize && onFrameSize) {
+        const notifyW = annotateMode ? fw : annotationSize?.width || fw;
+        const notifyH = annotateMode ? fh : annotationSize?.height || fh;
+        const prev = lastFrameSizeNotifyRef.current;
+        if (prev.w !== notifyW || prev.h !== notifyH) {
+          lastFrameSizeNotifyRef.current = { w: notifyW, h: notifyH };
+          onFrameSize({ width: notifyW, height: notifyH });
+        }
+      }
+    };
 
-    // 布局始终按当前画面实际分辨率；标注坐标经 annotationSize 换算到画面再映射到 viewport
-    const fw = nw;
-    const fh = nh;
-    setFrameSize({ w: fw, h: fh });
-    const nextLayout = computeContainLayout(stage.clientWidth, stage.clientHeight, fw, fh);
-    setLayout((prev) => {
-      if (
-        prev &&
-        prev.frameW === nextLayout.frameW &&
-        prev.frameH === nextLayout.frameH &&
-        prev.drawW === nextLayout.drawW &&
-        prev.drawH === nextLayout.drawH &&
-        prev.offsetX === nextLayout.offsetX &&
-        prev.offsetY === nextLayout.offsetY
-      ) {
-        return prev;
-      }
-      return nextLayout;
-    });
-    if (onFrameSize) {
-      const notifyW = annotateMode ? fw : annotationSize?.width || fw;
-      const notifyH = annotateMode ? fh : annotationSize?.height || fh;
-      const prev = lastFrameSizeNotifyRef.current;
-      if (prev.w !== notifyW || prev.h !== notifyH) {
-        lastFrameSizeNotifyRef.current = { w: notifyW, h: notifyH };
-        onFrameSize({ width: notifyW, height: notifyH });
-      }
+    if (previewEnabled) {
+      const el = showVideo ? videoRef.current : imgRef.current;
+      if (!el) return;
+      const nw = el.videoWidth || el.naturalWidth || 0;
+      const nh = el.videoHeight || el.naturalHeight || 0;
+      if (!nw) return;
+      applyFrame(nw, nh);
+      return;
     }
-  }, [annotationSize, annotateMode, onFrameSize, showVideo]);
+
+    if (annotateMode) return;
+
+    if (!showSkeletonLayer && !showRoiLayer) {
+      setLayout(null);
+      return;
+    }
+
+    const fw = liveInferWidth || annotationSize?.width || 640;
+    const fh = liveInferHeight || annotationSize?.height || 360;
+    applyFrame(fw, fh, false);
+  }, [
+    annotationSize,
+    annotateMode,
+    liveInferHeight,
+    liveInferWidth,
+    onFrameSize,
+    previewEnabled,
+    showRoiLayer,
+    showSkeletonLayer,
+    showVideo,
+  ]);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -315,7 +348,19 @@ export default function MonitorPreviewStage({
 
   useEffect(() => {
     updateLayout();
-  }, [mjpegSrc, format, imageSrc, annotateMode, updateLayout]);
+  }, [
+    mjpegSrc,
+    format,
+    imageSrc,
+    annotateMode,
+    overlayOnlyMode,
+    showSkeletonLayer,
+    showRoiLayer,
+    liveInferWidth,
+    liveInferHeight,
+    annotationSize,
+    updateLayout,
+  ]);
 
   useEffect(() => {
     if (!showVideo) return undefined;
@@ -464,8 +509,8 @@ export default function MonitorPreviewStage({
   return (
     <div className="monitor-stage">
       <div className="monitor-stage-main">
-        <div className={`monitor-stage-viewport${busy && !hasMedia ? ' is-busy' : ''}`} ref={stageRef}>
-        {cameraId ? (
+        <div className={`monitor-stage-viewport${busy && !showStageContent ? ' is-busy' : ''}`} ref={stageRef}>
+        {cameraId && showVideoLayer ? (
           <div className="monitor-stream-bar" role="group" aria-label="实时预览设置">
             <select
               className="monitor-stream-select"
@@ -495,34 +540,38 @@ export default function MonitorPreviewStage({
           </div>
         ) : null}
 
-        {hasMedia ? (
+        {showStageContent ? (
           <>
             <div className="monitor-media-fit">
               <div
-                className={`monitor-media-fit-inner${layout ? '' : ' is-loading'}${annotateMode ? ' is-annotate' : ''}`}
+                className={`monitor-media-fit-inner${layout ? '' : ' is-loading'}${annotateMode ? ' is-annotate' : ''}${overlayOnlyMode ? ' is-overlay-only' : ''}`}
                 style={
                   layout
                     ? { width: `${layout.drawW}px`, height: `${layout.drawH}px` }
                     : undefined
                 }
               >
-                <video
-                  ref={videoRef}
-                  className={`monitor-stage-media-fit${showVideo ? '' : ' is-hidden'}`}
-                  autoPlay
-                  muted
-                  playsInline
-                  onLoadedMetadata={updateLayout}
-                  onLoadedData={updateLayout}
-                  onPlaying={updateLayout}
-                />
-                <img
-                  ref={imgRef}
-                  src={imageSrc || undefined}
-                  alt=""
-                  className={`monitor-stage-media-fit${showVideo ? ' is-hidden' : ''}`}
-                  onLoad={updateLayout}
-                />
+                {previewEnabled ? (
+                  <>
+                    <video
+                      ref={videoRef}
+                      className={`monitor-stage-media-fit${showVideo ? '' : ' is-hidden'}`}
+                      autoPlay
+                      muted
+                      playsInline
+                      onLoadedMetadata={updateLayout}
+                      onLoadedData={updateLayout}
+                      onPlaying={updateLayout}
+                    />
+                    <img
+                      ref={imgRef}
+                      src={imageSrc || undefined}
+                      alt=""
+                      className={`monitor-stage-media-fit${showVideo ? ' is-hidden' : ''}`}
+                      onLoad={updateLayout}
+                    />
+                  </>
+                ) : null}
                 {annotateMode && annotateCanvasRef ? (
                   <canvas
                     ref={(node) => {
@@ -605,7 +654,7 @@ export default function MonitorPreviewStage({
             ) : null}
           </>
         ) : (
-          <div className="monitor-stage-empty">{busy ? '正在加载画面…' : emptyText}</div>
+          <div className="monitor-stage-empty">{busy ? '正在加载画面…' : stageEmptyText}</div>
         )}
         </div>
         {shelfBar ? <div className="monitor-stage-shelf-slot">{shelfBar}</div> : null}

@@ -68,9 +68,14 @@ export default function MonitorPage() {
   const [liveAlarms, setLiveAlarms] = useState([]);
   const [liveSkeletons, setLiveSkeletons] = useState([]);
   const [liveInferSize, setLiveInferSize] = useState({ w: 0, h: 0 });
+  const [showVideoLayer, setShowVideoLayer] = useState(false);
   const [showSkeletonLayer, setShowSkeletonLayer] = useState(true);
   const [showRoiLayer, setShowRoiLayer] = useState(true);
   const [playback, setPlayback] = useState(null);
+
+  useEffect(() => {
+    setShowVideoLayer(false);
+  }, [cameraId]);
   const [inferLoading, setInferLoading] = useState(false);
   const [shelfDrawerOpen, setShelfDrawerOpen] = useState(false);
   const [shelfDrawerForm, setShelfDrawerForm] = useState(emptyShelfForm);
@@ -792,6 +797,19 @@ export default function MonitorPage() {
               {viewMode === 'monitor' ? (
                 <div className="monitor-header-layers" role="group" aria-label="画面叠加层">
                   <label
+                    className={`monitor-layer-switch${showVideoLayer ? ' on' : ''}`}
+                    title="实时视频预览（WebRTC/HLS/MJPEG）"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={showVideoLayer}
+                      onChange={(e) => setShowVideoLayer(e.target.checked)}
+                      aria-label="摄像头画面"
+                    />
+                    <span className="monitor-layer-switch-track" aria-hidden />
+                    <span className="monitor-layer-switch-label">画面</span>
+                  </label>
+                  <label
                     className={`monitor-layer-switch${showSkeletonLayer ? ' on' : ''}`}
                     title="动作追踪（骨架）"
                   >
@@ -876,6 +894,7 @@ export default function MonitorPage() {
           liveSkeletons={liveSkeletons}
           liveInferWidth={liveInferSize.w}
           liveInferHeight={liveInferSize.h}
+          showVideoLayer={viewMode === 'annotate' ? true : showVideoLayer}
           showSkeletonLayer={showSkeletonLayer}
           showRoiLayer={showRoiLayer}
           annotateMode={viewMode === 'annotate'}

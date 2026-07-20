@@ -6,7 +6,6 @@ import asyncio
 import json
 import logging
 import os
-from services.wall_clock import wall_time_str
 
 import redis.asyncio as aioredis
 
@@ -16,6 +15,13 @@ from services.event_bus import publish_event_frame
 from services.event_engine.annotation_boxes import load_scaled_boxes
 from services.event_engine.collision import CollisionProcessor
 from services.event_engine.pick_prefilter.service import PickPrefilterGate
+from services.event_engine.event_log import (
+    PrefilterLogEntry,
+    collision_log_enabled,
+    event_log_context_from_pose,
+    format_event_log_line,
+    prefilter_log_enabled,
+)
 from services.event_engine.sharding import owns_camera, shard_config, shard_label
 from services.pose_bus import (
     POSE_CHANNEL_PREFIX,
@@ -33,36 +39,6 @@ from services.runtime_config_service import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _collision_log_enabled() -> bool:
-    return os.environ.get("COLLISION_LOG", "").strip().lower() in ("1", "true", "yes", "on")
-
-
-def _collision_log_wall_time() -> str:
-    """日志用标准本地时间：YYYY-MM-DD HH:MM:SS.mmm"""
-    return wall_time_str()
-
-
-def _format_log_video_time(sec: float) -> str:
-    total = max(0.0, float(sec))
-    m, s = divmod(int(total), 60)
-    ms = int(round((total - int(total)) * 1000))
-    return f"{m:02d}:{s:02d}.{ms:03d}"
-
-
-def _resolve_log_video_time(pose: dict, fallback_fps: float) -> tuple[float, str]:
-    vts = pose.get("video_time_sec")
-    if vts is not None:
-        try:
-            sec = float(vts)
-            return sec, _format_log_video_time(sec)
-        except (TypeError, ValueError):
-            pass
-    frame_idx = int(pose.get("frame_idx") or 0)
-    fps = float(pose.get("video_fps") or fallback_fps or 15.0)
-    sec = max(0.0, float(frame_idx - 1) / fps) if frame_idx > 0 and fps > 0 else 0.0
-    return sec, _format_log_video_time(sec)
 
 
 class _CameraContext:
@@ -246,31 +222,63 @@ class EventRedisWorker:
             ctx.last_frame_idx,
         )
 
-    def _log_collisions(
+    def _log_event_frame(
         self,
         pose: dict,
         collisions: list,
         alarm_collisions: list,
+        prefilter_logs: list[PrefilterLogEntry] | None = None,
     ) -> None:
-        if not _collision_log_enabled():
+        if not collision_log_enabled() and not prefilter_log_enabled():
             return
-        camera_id = str(pose.get("camera_id") or "")
-        frame_idx = int(pose.get("frame_idx") or 0)
-        run_id = str(pose.get("run_id") or "")
-        vsec, vtext = _resolve_log_video_time(pose, self._video_fps)
-        src = pose.get("source_mode") or "stream"
-        lat = pose.get("latency_ms") or {}
-        wall_time = _collision_log_wall_time()
-        prefix = f"[COLLISION][HIT] time={wall_time} camera={camera_id} source={src}"
-        if run_id:
-            prefix += f" run_id={run_id}"
-        prefix += f" video_time={vtext} video_sec={vsec:.3f} frame={frame_idx}"
+
+        ctx = event_log_context_from_pose(pose, self._video_fps)
+
+        if prefilter_log_enabled():
+            for entry in prefilter_logs or []:
+                decision = entry.decision
+                tag = "FILTERED" if decision.blocked else "PASS"
+                print(
+                    format_event_log_line(
+                        "PREFILTER",
+                        tag,
+                        ctx,
+                        track=decision.track_id,
+                        hits=entry.hits,
+                        alarms=[],
+                        speed_feature=decision.speed_feature,
+                        speed_value=decision.speed_value,
+                        speed_threshold=decision.speed_threshold,
+                        ankle_max_speed=decision.ankle_max_speed,
+                        ankle_max_speed_norm=decision.ankle_max_speed_norm,
+                        filtered=decision.blocked,
+                    ),
+                    flush=True,
+                )
+
+        if not collision_log_enabled():
+            return
+
         if collisions:
-            print(f"{prefix} hits={collisions} latency_ms={lat}", flush=True)
+            print(
+                format_event_log_line(
+                    "COLLISION",
+                    "HIT",
+                    ctx,
+                    hits=collisions,
+                    alarms=[],
+                ),
+                flush=True,
+            )
         if alarm_collisions:
             print(
-                f"{prefix.replace('[HIT]', '[ALARM]')} alarms={alarm_collisions} "
-                f"hits={collisions} latency_ms={lat}",
+                format_event_log_line(
+                    "COLLISION",
+                    "ALARM",
+                    ctx,
+                    hits=collisions,
+                    alarms=alarm_collisions,
+                ),
                 flush=True,
             )
 
@@ -413,9 +421,10 @@ class EventRedisWorker:
         frame_idx = int(result.get("frame_idx") or pose.get("frame_idx") or 0)
         collisions = result.get("collisions") or []
         alarm_collisions = result.get("alarm_collisions") or []
+        prefilter_logs = result.get("prefilter_logs") or []
         skeletons = result.get("skeletons")
 
-        self._log_collisions(pose, collisions, alarm_collisions)
+        self._log_event_frame(pose, collisions, alarm_collisions, prefilter_logs)
 
         await asyncio.to_thread(
             publish_event_frame,

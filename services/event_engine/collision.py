@@ -9,7 +9,7 @@ from typing import Protocol
 import cv2
 
 from services.box_identity import box_collision_token
-from services.event_engine.pick_prefilter.log import log_prefilter_decision
+from services.event_engine.event_log import PrefilterLogEntry
 
 
 class CollisionPrefilterProtocol(Protocol):
@@ -124,6 +124,7 @@ class CollisionProcessor:
         active_collisions: list[str] = []
         skeletons_data = []
         used_track_ids: set[int] = set()
+        prefilter_logs: list[PrefilterLogEntry] = []
 
         for person in persons:
             if not isinstance(person, dict):
@@ -162,7 +163,7 @@ class CollisionProcessor:
 
             collision_tokens = self._wrist_collision_tokens(keypoints, self.boxes)
             if prefilter is not None and decision is not None and collision_tokens:
-                log_prefilter_decision(pose_frame, decision, video_fps=self.video_fps)
+                prefilter_logs.append(PrefilterLogEntry(decision=decision, hits=collision_tokens))
 
             if decision is not None and decision.blocked:
                 continue
@@ -193,4 +194,5 @@ class CollisionProcessor:
             "alarm_collisions": alarm_collisions,
             "skeletons": skeletons_data,
             "frame_idx": frame_idx,
+            "prefilter_logs": prefilter_logs,
         }

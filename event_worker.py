@@ -31,10 +31,10 @@ async def _run():
         from services.event_engine.sharding import shard_label
 
         print(f"ℹ️ Event worker 已启动 delivery=pubsub ({shard_label()}) id={instance_id or 'local'}")
-    if os.environ.get("COLLISION_LOG", "").strip().lower() in ("1", "true", "yes", "on"):
-        print("ℹ️ 碰撞终端日志已开启 COLLISION_LOG=1（每帧 HIT + 告警 ALARM）")
-    from services.event_engine.pick_prefilter.log import prefilter_log_enabled
+    from services.event_engine.event_log import collision_log_enabled, prefilter_log_enabled
 
+    if collision_log_enabled():
+        print("ℹ️ 碰撞终端日志已开启 COLLISION_LOG=1（HIT / ALARM，字段与 PREFILTER 统一）")
     if prefilter_log_enabled():
         print("ℹ️ 前置门控终端日志已开启（PREFILTER_LOG 或 COLLISION_LOG=1）")
 

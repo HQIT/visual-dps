@@ -9,9 +9,12 @@ from typing import Protocol
 import cv2
 
 from services.box_identity import box_collision_token
+from services.event_engine.pick_prefilter.log import log_prefilter_decision
 
 
 class CollisionPrefilterProtocol(Protocol):
+    def evaluate(self, pose_frame: dict, track_id: int, person: dict): ...
+
     def should_block(self, pose_frame: dict, track_id: int, person: dict) -> bool: ...
 
 
@@ -86,6 +89,28 @@ class CollisionProcessor:
         self.person_assigner.tracks.clear()
         self.person_assigner.next_id = 1
 
+    @staticmethod
+    def _wrist_collision_tokens(keypoints: list, boxes: list) -> list[str]:
+        """手腕进框时返回碰撞 token（与是否被门控无关）。"""
+        tokens: list[str] = []
+        for kpt_idx in (9, 10):
+            if len(keypoints) <= kpt_idx:
+                continue
+            kp = keypoints[kpt_idx]
+            if len(kp) < 3 or float(kp[2]) <= 0.3:
+                continue
+            wx, wy = float(kp[0]), float(kp[1])
+            for box in boxes:
+                contour = box.get("orig_contour")
+                if contour is None:
+                    continue
+                if cv2.pointPolygonTest(contour, (wx, wy), False) >= 0:
+                    token = box_collision_token(box)
+                    if token:
+                        tokens.append(token)
+                    break
+        return list(set(tokens))
+
     def process(
         self,
         pose_frame: dict,
@@ -131,25 +156,19 @@ class CollisionProcessor:
             skel["person_track_id"] = person_track_id
             skeletons_data.append(skel)
 
-            if prefilter is not None and prefilter.should_block(pose_frame, person_track_id, person):
+            decision = None
+            if prefilter is not None:
+                decision = prefilter.evaluate(pose_frame, person_track_id, person)
+
+            collision_tokens = self._wrist_collision_tokens(keypoints, self.boxes)
+            if prefilter is not None and decision is not None and collision_tokens:
+                log_prefilter_decision(pose_frame, decision, video_fps=self.video_fps)
+
+            if decision is not None and decision.blocked:
                 continue
 
-            for kpt_idx in (9, 10):
-                if len(keypoints) <= kpt_idx:
-                    continue
-                kp = keypoints[kpt_idx]
-                if len(kp) < 3 or float(kp[2]) <= 0.3:
-                    continue
-                wx, wy = float(kp[0]), float(kp[1])
-                for box in self.boxes:
-                    contour = box.get("orig_contour")
-                    if contour is None:
-                        continue
-                    if cv2.pointPolygonTest(contour, (wx, wy), False) >= 0:
-                        token = box_collision_token(box)
-                        if token:
-                            active_collisions.append(token)
-                        break
+            for token in collision_tokens:
+                active_collisions.append(token)
 
         active_collisions = list(set(active_collisions))
         current_tokens = set(active_collisions)

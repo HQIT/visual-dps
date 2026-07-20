@@ -102,6 +102,80 @@ export const GLOBAL_COLLISION_FIELDS = [
   },
 ];
 
+/** 仅全局设置页：碰撞前置门控（event-worker 读取） */
+export const GLOBAL_PREFILTER_FIELDS = [
+  {
+    key: 'collision_prefilter.enabled',
+    label: '启用碰撞前置门控',
+    type: 'boolean',
+    hint: '开启后：ankle_max_speed_norm@0.081770 + triple90 + shknee140；关闭时与现网 baseline 相同。',
+    effectHint:
+      '保存后 visual-dps-event-worker 会自动读取 localdata/runtime_config.json；若未生效请执行 docker restart visual-dps-event-worker。',
+  },
+  {
+    key: 'collision_prefilter.speed_threshold',
+    label: '踝部归一化速度阈值',
+    type: 'number',
+    min: 0.01,
+    max: 0.5,
+    step: 0.000001,
+    hint: 'ankle_max_speed_norm 超过此值且未满足 triple90 豁免、且判定为站立时，跳过手腕碰撞检测。标定默认 0.081770。',
+    effectHint:
+      '保存后 visual-dps-event-worker 会自动读取 localdata/runtime_config.json；若未生效请执行 docker restart visual-dps-event-worker。',
+  },
+  {
+    key: 'collision_prefilter.arm_torso_min',
+    label: 'triple90：肩-躯干角下限 (°)',
+    type: 'number',
+    min: 0,
+    max: 180,
+    hint: 'arm_torso_angle_max 豁免条件之一。',
+    effectHint:
+      '保存后 visual-dps-event-worker 会自动读取 localdata/runtime_config.json；若未生效请执行 docker restart visual-dps-event-worker。',
+  },
+  {
+    key: 'collision_prefilter.elbow_min',
+    label: 'triple90：肘角均值下限 (°)',
+    type: 'number',
+    min: 0,
+    max: 180,
+    hint: 'elbow_angle_mean 豁免条件之一。',
+    effectHint:
+      '保存后 visual-dps-event-worker 会自动读取 localdata/runtime_config.json；若未生效请执行 docker restart visual-dps-event-worker。',
+  },
+  {
+    key: 'collision_prefilter.wrist_elevation_min',
+    label: 'triple90：腕抬升角下限 (°)',
+    type: 'number',
+    min: 0,
+    max: 180,
+    hint: 'wrist_elevation_angle_max 豁免条件之一。',
+    effectHint:
+      '保存后 visual-dps-event-worker 会自动读取 localdata/runtime_config.json；若未生效请执行 docker restart visual-dps-event-worker。',
+  },
+  {
+    key: 'collision_prefilter.stance_threshold',
+    label: '站立判定：肩-髋-膝角下限 (°)',
+    type: 'number',
+    min: 0,
+    max: 180,
+    hint: 'shoulder_hip_knee_angle_min 低于此值视为蹲姿，不 block；缺角度时视为站立。',
+    effectHint:
+      '保存后 visual-dps-event-worker 会自动读取 localdata/runtime_config.json；若未生效请执行 docker restart visual-dps-event-worker。',
+  },
+  {
+    key: 'collision_prefilter.max_pose_gap_sec',
+    label: '姿态断流重置间隔 (秒)',
+    type: 'number',
+    min: 0,
+    max: 30,
+    step: 0.01,
+    hint: '相邻 pose 墙钟间隔超过此值则重置速度历史；0 表示自动（interval/frame_rate×2.5）。',
+    effectHint:
+      '保存后 visual-dps-event-worker 会自动读取 localdata/runtime_config.json；若未生效请执行 docker restart visual-dps-event-worker。',
+  },
+];
+
 /** 合并 hint 与生效说明，供 FieldHint 展示 */
 export function settingsFieldTooltip(field) {
   if (!field) return '';

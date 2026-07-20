@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import Protocol
 
 import cv2
 
 from services.box_identity import box_collision_token
+
+
+class CollisionPrefilterProtocol(Protocol):
+    def should_block(self, pose_frame: dict, track_id: int, person: dict) -> bool: ...
 
 
 @dataclass
@@ -81,7 +86,11 @@ class CollisionProcessor:
         self.person_assigner.tracks.clear()
         self.person_assigner.next_id = 1
 
-    def process(self, pose_frame: dict) -> dict:
+    def process(
+        self,
+        pose_frame: dict,
+        prefilter: CollisionPrefilterProtocol | None = None,
+    ) -> dict:
         """返回 collisions、alarm_collisions、带 track 的 skeletons（供 SSE 合并）。"""
         frame_idx = int(pose_frame.get("frame_idx") or 0)
         now_ts = frame_idx / self.video_fps if self.video_fps > 0 else 0.0
@@ -121,6 +130,9 @@ class CollisionProcessor:
             skel = dict(person)
             skel["person_track_id"] = person_track_id
             skeletons_data.append(skel)
+
+            if prefilter is not None and prefilter.should_block(pose_frame, person_track_id, person):
+                continue
 
             for kpt_idx in (9, 10):
                 if len(keypoints) <= kpt_idx:

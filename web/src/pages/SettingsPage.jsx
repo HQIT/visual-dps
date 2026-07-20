@@ -5,7 +5,7 @@ import LogsPanel from '../components/LogsPanel';
 import ConfirmDialog from '../components/ConfirmDialog';
 import UserDrawer from '../components/UserDrawer';
 import FieldHint from '../components/FieldHint';
-import { CAMERA_OVERRIDE_FIELDS, GLOBAL_COLLISION_FIELDS, settingsFieldTooltip } from '../lib/cameraSettings';
+import { CAMERA_OVERRIDE_FIELDS, GLOBAL_COLLISION_FIELDS, GLOBAL_PREFILTER_FIELDS, settingsFieldTooltip } from '../lib/cameraSettings';
 import { InferenceModelGlobalFields } from '../components/InferenceModelFields';
 import { formatUserError } from '../lib/userFacingText';
 import './SettingsPage.css';
@@ -352,6 +352,48 @@ export default function SettingsPage() {
                   />
                 </label>
               ))}
+              <h3 className="settings-subsection-title">碰撞前置门控</h3>
+              {GLOBAL_PREFILTER_FIELDS.map((field) => {
+                const prefilterEnabled = Boolean(settings['collision_prefilter.enabled']);
+                const disabled = field.key !== 'collision_prefilter.enabled' && !prefilterEnabled;
+                return (
+                  <label key={field.key} className={disabled ? 'settings-field-disabled' : undefined}>
+                    <span className="settings-field-label">
+                      {field.label}
+                      <FieldHint text={settingsFieldTooltip(field)} />
+                    </span>
+                    {field.type === 'boolean' ? (
+                      <span className="settings-toggle-field">
+                        <span className="settings-toggle">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(settings[field.key])}
+                            onChange={(e) =>
+                              setSettings((s) => ({ ...s, [field.key]: e.target.checked }))
+                            }
+                          />
+                          <span className="settings-toggle-track" aria-hidden="true" />
+                        </span>
+                      </span>
+                    ) : (
+                      <input
+                        type="number"
+                        min={field.min}
+                        max={field.max}
+                        step={field.step ?? 1}
+                        disabled={disabled}
+                        value={settings[field.key] ?? ''}
+                        onChange={(e) =>
+                          setSettings((s) => ({
+                            ...s,
+                            [field.key]: Number(e.target.value),
+                          }))
+                        }
+                      />
+                    )}
+                  </label>
+                );
+              })}
             </div>
             <div className="settings-panel-footer">
               <button type="submit" className="settings-btn-primary">

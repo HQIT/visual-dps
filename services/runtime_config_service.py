@@ -25,6 +25,15 @@ PUBLIC_KEYS = {
     "inference.pose_frame_interval": ("inference", "pose_frame_interval", int),
     "inference.alarm_min_consecutive_frames": ("inference", "alarm_min_consecutive_frames", int),
     "inference.alarm_cooldown_frames": ("inference", "alarm_cooldown_frames", int),
+    "collision_prefilter.enabled": ("collision_prefilter", "enabled", bool),
+    "collision_prefilter.speed_feature": ("collision_prefilter", "speed_feature", str),
+    "collision_prefilter.speed_threshold": ("collision_prefilter", "speed_threshold", float),
+    "collision_prefilter.arm_torso_min": ("collision_prefilter", "arm_torso_min", float),
+    "collision_prefilter.elbow_min": ("collision_prefilter", "elbow_min", float),
+    "collision_prefilter.wrist_elevation_min": ("collision_prefilter", "wrist_elevation_min", float),
+    "collision_prefilter.stance_feature": ("collision_prefilter", "stance_feature", str),
+    "collision_prefilter.stance_threshold": ("collision_prefilter", "stance_threshold", float),
+    "collision_prefilter.max_pose_gap_sec": ("collision_prefilter", "max_pose_gap_sec", float),
     "debug-info.enabled": ("debug-info", "enabled", bool),
 }
 
@@ -33,6 +42,15 @@ GLOBAL_ONLY_KEYS = frozenset(
     {
         "inference.alarm_min_consecutive_frames",
         "inference.alarm_cooldown_frames",
+        "collision_prefilter.enabled",
+        "collision_prefilter.speed_feature",
+        "collision_prefilter.speed_threshold",
+        "collision_prefilter.arm_torso_min",
+        "collision_prefilter.elbow_min",
+        "collision_prefilter.wrist_elevation_min",
+        "collision_prefilter.stance_feature",
+        "collision_prefilter.stance_threshold",
+        "collision_prefilter.max_pose_gap_sec",
     }
 )
 
@@ -101,6 +119,33 @@ def _resolve_alarm_cooldown(cfg: dict) -> int:
     return 12
 
 
+def _default_collision_prefilter_section() -> dict[str, Any]:
+    return {
+        "enabled": False,
+        "speed_feature": "ankle_max_speed_norm",
+        "speed_threshold": 0.081770,
+        "arm_torso_min": 90.0,
+        "elbow_min": 150.0,
+        "wrist_elevation_min": 60.0,
+        "stance_feature": "shoulder_hip_knee_angle_min",
+        "stance_threshold": 140.0,
+        "max_pose_gap_sec": 0.0,
+    }
+
+
+def get_collision_prefilter_section(app_config: dict | None = None, path: str = DEFAULT_PATH) -> dict:
+    """app_config 与 runtime 覆盖合并（供 event-worker 读取碰撞前置门控）。"""
+    base = dict(_default_collision_prefilter_section())
+    app_sec = (app_config or {}).get("collision_prefilter")
+    if isinstance(app_sec, dict):
+        base.update(app_sec)
+    overlay = _load_json(path)
+    overlay_sec = overlay.get("collision_prefilter")
+    if isinstance(overlay_sec, dict):
+        base.update(overlay_sec)
+    return base
+
+
 def get_merged_inference_section(app_config: dict | None = None, path: str = DEFAULT_PATH) -> dict:
     """app_config.inference 与 runtime 覆盖合并（供 event-worker 读取告警门控）。"""
     base_infer = dict((app_config or {}).get("inference") or {})
@@ -120,6 +165,10 @@ def _coerce_setting_value(pub_key: str, raw: Any, typ: type) -> Any:
         return _coerce_alarm_min(raw)
     if pub_key == "inference.alarm_cooldown_frames":
         return _coerce_alarm_cooldown(raw)
+    if pub_key == "collision_prefilter.max_pose_gap_sec":
+        return max(0.0, float(raw))
+    if pub_key.startswith("collision_prefilter.") and typ is float:
+        return float(raw)
     if typ is bool:
         if isinstance(raw, bool):
             return raw
@@ -192,6 +241,40 @@ def get_public_settings(app_config: dict | None, path: str = DEFAULT_PATH) -> di
                 int(_deep_get(merged, "inference", "alarm_min_consecutive_frames", 3) or 3),
             ),
             "inference.alarm_cooldown_frames": _resolve_alarm_cooldown(merged),
+            "collision_prefilter.enabled": bool(
+                _deep_get(merged, "collision_prefilter", "enabled", False)
+            ),
+            "collision_prefilter.speed_feature": str(
+                _deep_get(merged, "collision_prefilter", "speed_feature", "ankle_max_speed_norm")
+                or "ankle_max_speed_norm"
+            ),
+            "collision_prefilter.speed_threshold": float(
+                _deep_get(merged, "collision_prefilter", "speed_threshold", 0.081770)
+            ),
+            "collision_prefilter.arm_torso_min": float(
+                _deep_get(merged, "collision_prefilter", "arm_torso_min", 90.0)
+            ),
+            "collision_prefilter.elbow_min": float(
+                _deep_get(merged, "collision_prefilter", "elbow_min", 150.0)
+            ),
+            "collision_prefilter.wrist_elevation_min": float(
+                _deep_get(merged, "collision_prefilter", "wrist_elevation_min", 60.0)
+            ),
+            "collision_prefilter.stance_feature": str(
+                _deep_get(
+                    merged,
+                    "collision_prefilter",
+                    "stance_feature",
+                    "shoulder_hip_knee_angle_min",
+                )
+                or "shoulder_hip_knee_angle_min"
+            ),
+            "collision_prefilter.stance_threshold": float(
+                _deep_get(merged, "collision_prefilter", "stance_threshold", 140.0)
+            ),
+            "collision_prefilter.max_pose_gap_sec": float(
+                _deep_get(merged, "collision_prefilter", "max_pose_gap_sec", 0.0) or 0.0
+            ),
             "debug-info.enabled": bool(_deep_get(merged, "debug-info", "enabled", False)),
         },
     }
@@ -214,6 +297,10 @@ def patch_public_settings(updates: dict, path: str = DEFAULT_PATH) -> dict:
                 val = _coerce_alarm_min(raw)
             elif pub_key == "inference.alarm_cooldown_frames":
                 val = _coerce_alarm_cooldown(raw)
+            elif pub_key == "collision_prefilter.max_pose_gap_sec":
+                val = max(0.0, float(raw))
+            elif pub_key.startswith("collision_prefilter.") and typ is float:
+                val = float(raw)
             elif typ is bool:
                 val = bool(raw) if not isinstance(raw, str) else raw.lower() in ("1", "true", "yes", "on")
             elif typ is int:

@@ -15,6 +15,7 @@ from services.box_identity import parse_collision_token
 from services.event_bus import publish_event_frame
 from services.event_engine.annotation_boxes import load_scaled_boxes
 from services.event_engine.collision import CollisionProcessor
+from services.event_engine.pick_prefilter.service import PickPrefilterGate
 from services.event_engine.sharding import owns_camera, shard_config, shard_label
 from services.pose_bus import (
     POSE_CHANNEL_PREFIX,
@@ -25,7 +26,11 @@ from services.pose_bus import (
     pose_delivery_mode,
     redis_url,
 )
-from services.runtime_config_service import DEFAULT_PATH, get_merged_inference_section
+from services.runtime_config_service import (
+    DEFAULT_PATH,
+    get_collision_prefilter_section,
+    get_merged_inference_section,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,12 +71,14 @@ class _CameraContext:
         json_path: str,
         json_mtime: float = 0.0,
         processor: CollisionProcessor | None = None,
+        prefilter: PickPrefilterGate | None = None,
         infer_w: int = 0,
         infer_h: int = 0,
     ):
         self.json_path = json_path
         self.json_mtime = json_mtime
         self.processor = processor
+        self.prefilter = prefilter
         self.infer_w = infer_w
         self.infer_h = infer_h
         self.last_frame_idx = -1
@@ -86,18 +93,18 @@ class EventRedisWorker:
             or str(app_config.get("paths", {}).get("json_dir", "localdata/json"))
         )
         self._runtime_config_path = os.environ.get("RUNTIME_CONFIG_FILE", DEFAULT_PATH)
-        self._alarm_settings_mtime: float | None = None
+        self._runtime_settings_mtime: float | None = None
         self._contexts: dict[str, _CameraContext] = {}
         infer_cfg = get_merged_inference_section(app_config, self._runtime_config_path)
-        self._apply_alarm_settings(infer_cfg)
+        self._apply_runtime_settings(infer_cfg)
         try:
-            self._alarm_settings_mtime = (
+            self._runtime_settings_mtime = (
                 os.path.getmtime(self._runtime_config_path)
                 if os.path.isfile(self._runtime_config_path)
                 else 0.0
             )
         except OSError:
-            self._alarm_settings_mtime = 0.0
+            self._runtime_settings_mtime = 0.0
         self._delivery = pose_delivery_mode()
         self._shard_count, self._shard_index = shard_config()
         self._consumer_name = default_consumer_name()
@@ -105,32 +112,59 @@ class EventRedisWorker:
         self._redis: aioredis.Redis | None = None
         self._pubsub: aioredis.client.PubSub | None = None
 
-    def _apply_alarm_settings(self, infer_cfg: dict) -> None:
+    def _apply_runtime_settings(self, infer_cfg: dict) -> None:
         self._alarm_min = max(1, int(infer_cfg.get("alarm_min_consecutive_frames", 3) or 3))
         if "alarm_cooldown_frames" in infer_cfg:
             self._alarm_cooldown = max(0, int(infer_cfg["alarm_cooldown_frames"]))
         else:
             self._alarm_cooldown = 12
         self._video_fps = float(infer_cfg.get("frame_rate", 15) or 15)
+        self._pose_frame_interval = max(1, int(infer_cfg.get("pose_frame_interval", 1) or 1))
+        self._prefilter_section = get_collision_prefilter_section(
+            self.app_config,
+            self._runtime_config_path,
+        )
         for ctx in self._contexts.values():
             proc = ctx.processor
-            if proc is None:
-                continue
-            proc.alarm_min_consecutive_frames = self._alarm_min
-            proc.alarm_cooldown_frames = self._alarm_cooldown
-            proc.video_fps = self._video_fps
+            if proc is not None:
+                proc.alarm_min_consecutive_frames = self._alarm_min
+                proc.alarm_cooldown_frames = self._alarm_cooldown
+                proc.video_fps = self._video_fps
+            self._sync_prefilter(ctx)
 
-    def _refresh_alarm_settings_if_needed(self) -> None:
+    def _sync_prefilter(self, ctx: _CameraContext) -> None:
+        section = self._prefilter_section
+        if not section.get("enabled"):
+            ctx.prefilter = None
+            return
+        if ctx.prefilter is None:
+            ctx.prefilter = PickPrefilterGate.from_config(
+                section,
+                infer_width=ctx.infer_w,
+                infer_height=ctx.infer_h,
+                video_fps=self._video_fps,
+                pose_frame_interval=self._pose_frame_interval,
+            )
+            return
+        ctx.prefilter.apply_config(
+            section,
+            infer_width=ctx.infer_w,
+            infer_height=ctx.infer_h,
+            video_fps=self._video_fps,
+            pose_frame_interval=self._pose_frame_interval,
+        )
+
+    def _refresh_runtime_settings_if_needed(self) -> None:
         path = self._runtime_config_path
         try:
             mtime = os.path.getmtime(path) if os.path.isfile(path) else 0.0
         except OSError:
             mtime = 0.0
-        if self._alarm_settings_mtime == mtime:
+        if self._runtime_settings_mtime == mtime:
             return
-        self._alarm_settings_mtime = mtime
+        self._runtime_settings_mtime = mtime
         infer_cfg = get_merged_inference_section(self.app_config, path)
-        self._apply_alarm_settings(infer_cfg)
+        self._apply_runtime_settings(infer_cfg)
 
     def _resolve_json_path(self, camera_id: str) -> str:
         rel = camera_annotation_path(self._json_dir, camera_id)
@@ -146,7 +180,7 @@ class EventRedisWorker:
         return rel
 
     def _get_processor(self, camera_id: str, infer_w: int, infer_h: int) -> CollisionProcessor | None:
-        self._refresh_alarm_settings_if_needed()
+        self._refresh_runtime_settings_if_needed()
         json_path = self._resolve_json_path(camera_id)
         ctx = self._contexts.get(camera_id)
         mtime = os.path.getmtime(json_path) if os.path.isfile(json_path) else 0.0
@@ -167,14 +201,26 @@ class EventRedisWorker:
                 alarm_cooldown_frames=self._alarm_cooldown,
                 video_fps=self._video_fps,
             )
+            prefilter = None
+            if self._prefilter_section.get("enabled"):
+                prefilter = PickPrefilterGate.from_config(
+                    self._prefilter_section,
+                    infer_width=infer_w,
+                    infer_height=infer_h,
+                    video_fps=self._video_fps,
+                    pose_frame_interval=self._pose_frame_interval,
+                )
             ctx = _CameraContext(
                 json_path=json_path,
                 json_mtime=mtime,
                 processor=processor,
+                prefilter=prefilter,
                 infer_w=infer_w,
                 infer_h=infer_h,
             )
             self._contexts[camera_id] = ctx
+        else:
+            self._sync_prefilter(ctx)
 
         return ctx.processor
 
@@ -191,6 +237,8 @@ class EventRedisWorker:
         if proc is None:
             return
         proc.reset_infer_session()
+        if ctx.prefilter is not None:
+            ctx.prefilter.reset_session()
         logger.info(
             "event worker: infer frame_idx regression camera=%s frame=%s last=%s; reset collision session",
             camera_id,
@@ -361,7 +409,7 @@ class EventRedisWorker:
         self._maybe_reset_on_frame_regression(camera_id, ctx, frame_idx)
         ctx.last_frame_idx = frame_idx
 
-        result = await asyncio.to_thread(processor.process, pose)
+        result = await asyncio.to_thread(processor.process, pose, ctx.prefilter)
         frame_idx = int(result.get("frame_idx") or pose.get("frame_idx") or 0)
         collisions = result.get("collisions") or []
         alarm_collisions = result.get("alarm_collisions") or []

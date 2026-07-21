@@ -77,6 +77,7 @@ mkdir -p "${APP}/core" "${APP}/services/inference_backends"
 cp "${ROOT}/inference_worker.py" "${APP}/"
 cp "${ROOT}/core/config.py" "${APP}/core/"
 for rel in \
+  services/inference_service.py \
   services/hwaccel_probe.py \
   services/nvidia_pip_cuda.py \
   services/rtsp_capture.py \
@@ -100,9 +101,11 @@ chmod +x "${ROOT}/deploy/generate-weights-manifest.sh"
 "${ROOT}/deploy/generate-weights-manifest.sh" "${WEIGHTS}"
 
 # 部署脚本
+mkdir -p "${PKG}/scripts"
 cp "${ROOT}/scripts/deploy-only/install.sh" "${PKG}/install.sh"
 cp "${ROOT}/scripts/deploy-only/verify-package.sh" "${PKG}/verify-package.sh"
 cp "${ROOT}/scripts/deploy-only/verify-images.sh" "${PKG}/verify-images.sh"
+cp "${ROOT}/scripts/deploy-only/infer-bind-mounts.sh" "${PKG}/scripts/infer-bind-mounts.sh"
 cp "${ROOT}/scripts/deploy-only/pack-deploy.sh" "${PKG}/pack-deploy.sh"
 cp "${ROOT}/scripts/deploy-only/DEPLOY-0629.md" "${PKG}/DEPLOY-0629.md"
 chmod +x "${PKG}/install.sh" "${PKG}/verify-package.sh" "${PKG}/verify-images.sh" "${PKG}/pack-deploy.sh"

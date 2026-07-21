@@ -72,7 +72,10 @@ if [[ -z "${HPR}" ]]; then
   echo "错误: app/.env 未设置 HOST_PROJECT_ROOT" >&2
   exit 1
 fi
-for need in inference_worker.py core/config.py services/inference_backends/model_registry.py; do
+# shellcheck disable=SC1091
+source "${PKG_ROOT}/scripts/infer-bind-mounts.sh" 2>/dev/null \
+  || source "${SCRIPT_DIR}/infer-bind-mounts.sh"
+for need in "${INFER_BIND_MOUNT_FILES[@]}"; do
   if [[ ! -f "${HPR}/${need}" ]]; then
     echo "错误: HOST_PROJECT_ROOT=${HPR} 缺少 ${need}（推理 bind mount）" >&2
     echo "      请将 app/.env 中 HOST_PROJECT_ROOT 改为本机 app 绝对路径" >&2

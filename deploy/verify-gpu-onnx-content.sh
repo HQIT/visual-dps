@@ -22,7 +22,7 @@ if [[ "${VERIFY_GPU_SKIP:-0}" != "1" ]]; then
   fi
 fi
 
-docker run --rm "${GPU_ARGS[@]}" -e "VERIFY_GPU_SKIP=${VERIFY_GPU_SKIP:-0}" "${IMAGE}" python3 - <<'PY'
+docker run --rm -i "${GPU_ARGS[@]}" -e "VERIFY_GPU_SKIP=${VERIFY_GPU_SKIP:-0}" "${IMAGE}" python3 - <<'PY'
 import importlib.metadata as m
 import sys
 

@@ -16,9 +16,10 @@ for f in install.sh verify-images.sh scripts/load-split-images.sh \
   [[ -f "${PKG_ROOT}/${f}" ]] && note_ok "${f}" || note_fail "缺少 ${f}"
 done
 
-for f in inference_worker.py core/config.py services/inference_backends/model_registry.py; do
-  [[ -f "${PKG_ROOT}/app/${f}" ]] && note_ok "app/${f}" || note_fail "缺少 app/${f}"
-done
+# shellcheck disable=SC1091
+source "${PKG_ROOT}/scripts/infer-bind-mounts.sh" 2>/dev/null \
+  || source "$(dirname "${BASH_SOURCE[0]}")/infer-bind-mounts.sh"
+check_infer_bind_mounts "${PKG_ROOT}/app" || note_fail "推理 bind mount 文件不完整"
 
 MANIFEST="${PKG_ROOT}/docker-images/images.manifest"
 if [[ -f "${MANIFEST}" ]]; then

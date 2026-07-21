@@ -15,9 +15,10 @@ for f in install.sh verify-images.sh app/docker-compose.deploy.yml app/.env app/
 done
 
 # 推理 bind mount 源码
-for f in inference_worker.py core/config.py services/inference_backends/model_registry.py; do
-  [[ -f "${PKG_ROOT}/app/${f}" ]] && note_ok "app/${f}" || note_fail "缺少 app/${f}"
-done
+# shellcheck disable=SC1091
+source "${PKG_ROOT}/scripts/infer-bind-mounts.sh" 2>/dev/null \
+  || source "$(dirname "${BASH_SOURCE[0]}")/infer-bind-mounts.sh"
+check_infer_bind_mounts "${PKG_ROOT}/app" || FAIL=1
 
 # shellcheck disable=SC1091
 source "${PKG_ROOT}/app/deploy/check-model-weights.sh" 2>/dev/null \

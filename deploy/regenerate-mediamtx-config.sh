@@ -38,7 +38,8 @@ if [[ -f "${APP_DIR}/app_config.json" ]]; then
 fi
 
 echo "==> 按 .env 生成 mediamtx.yml（镜像 ${UI_IMAGE}）..."
-docker run --rm \
+# 须 -i：否则 heredoc 留在宿主机 stdin，容器内 python3 - 读不到脚本
+docker run --rm -i \
   -v "${LOCALDATA}:/app/localdata" \
   "${APP_CONFIG_MOUNT[@]}" \
   --env-file "${ENV_FILE}" \

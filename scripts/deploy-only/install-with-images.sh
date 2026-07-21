@@ -77,7 +77,10 @@ source "${APP_DIR}/.env" 2>/dev/null || true
 set +a
 
 HPR="${HOST_PROJECT_ROOT:-}"
-for need in inference_worker.py core/config.py services/inference_backends/model_registry.py; do
+# shellcheck disable=SC1091
+source "${PKG_ROOT}/scripts/infer-bind-mounts.sh" 2>/dev/null \
+  || source "${SCRIPT_DIR}/infer-bind-mounts.sh"
+for need in "${INFER_BIND_MOUNT_FILES[@]}"; do
   [[ -f "${HPR}/${need}" ]] || { echo "错误: HOST_PROJECT_ROOT=${HPR} 缺少 ${need}" >&2; exit 1; }
 done
 

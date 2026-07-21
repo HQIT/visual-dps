@@ -99,6 +99,7 @@ fi
 echo "==> 3/3 安装分拆包脚本"
 mkdir -p "${OUT}/scripts"
 cp "${ROOT}/scripts/deploy-only/load-split-images.sh" "${OUT}/scripts/load-split-images.sh"
+cp "${ROOT}/scripts/deploy-only/infer-bind-mounts.sh" "${OUT}/scripts/infer-bind-mounts.sh"
 cp "${ROOT}/scripts/deploy-only/install-with-images.sh" "${OUT}/install.sh"
 cp "${ROOT}/scripts/deploy-only/verify-package-split.sh" "${OUT}/verify-package.sh"
 chmod +x "${OUT}/install.sh" "${OUT}/verify-package.sh" "${OUT}/scripts/load-split-images.sh"

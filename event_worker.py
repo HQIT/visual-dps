@@ -8,10 +8,20 @@ from core.config import load_app_config
 from services.callback_reporter import CollisionCallbackReporter
 from services.event_engine.sharding import shard_label
 from services.event_engine.worker import EventRedisWorker
+from services.pipeline_log import (
+    apply_pipeline_log_config,
+    configure_pipeline_logger,
+    log_pipeline_info,
+    pipeline_log_file_path,
+)
 
 
 async def _run():
     app_config = load_app_config()
+    apply_pipeline_log_config(app_config)
+    configure_pipeline_logger(role="worker")
+    log_pipeline_info(f"Event worker 流水线日志 role=worker file={pipeline_log_file_path() or 'stdout'}")
+
     reporter = CollisionCallbackReporter(app_config.get("reporting", {}))
     await reporter.start()
 

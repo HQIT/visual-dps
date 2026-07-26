@@ -35,6 +35,11 @@ PUBLIC_KEYS = {
     "collision_prefilter.stance_threshold": ("collision_prefilter", "stance_threshold", float),
     "collision_prefilter.max_pose_gap_sec": ("collision_prefilter", "max_pose_gap_sec", float),
     "debug-info.enabled": ("debug-info", "enabled", bool),
+    "pipeline_log.enabled": ("pipeline_log", "enabled", bool),
+    "pipeline_log.file_enabled": ("pipeline_log", "file_enabled", bool),
+    "pipeline_log.dir": ("pipeline_log", "dir", str),
+    "pipeline_log.sample": ("pipeline_log", "sample", int),
+    "pipeline_log.stdout": ("pipeline_log", "stdout", bool),
 }
 
 # 仅全局设置页暴露，event-worker 读取；不支持按摄像头覆盖
@@ -51,6 +56,11 @@ GLOBAL_ONLY_KEYS = frozenset(
         "collision_prefilter.stance_feature",
         "collision_prefilter.stance_threshold",
         "collision_prefilter.max_pose_gap_sec",
+        "pipeline_log.enabled",
+        "pipeline_log.file_enabled",
+        "pipeline_log.dir",
+        "pipeline_log.sample",
+        "pipeline_log.stdout",
     }
 )
 
@@ -154,6 +164,37 @@ def get_merged_inference_section(app_config: dict | None = None, path: str = DEF
     if isinstance(overlay_infer, dict):
         base_infer.update(overlay_infer)
     return base_infer
+
+
+def _default_pipeline_log_section() -> dict:
+    return {
+        "enabled": False,
+        "file_enabled": False,
+        "dir": "localdata/logs/pipeline",
+        "sample": 30,
+        "stdout": True,
+    }
+
+
+def get_pipeline_log_section(app_config: dict | None = None, path: str = DEFAULT_PATH) -> dict:
+    """app_config.pipeline_log 与 runtime 覆盖合并（供 infer / event-worker 读取）。"""
+    base = dict(_default_pipeline_log_section())
+    app_sec = (app_config or {}).get("pipeline_log")
+    if isinstance(app_sec, dict):
+        base.update(app_sec)
+    overlay = _load_json(path)
+    overlay_sec = overlay.get("pipeline_log")
+    if isinstance(overlay_sec, dict):
+        base.update(overlay_sec)
+    try:
+        base["sample"] = max(1, int(base.get("sample") or 30))
+    except (TypeError, ValueError):
+        base["sample"] = 30
+    base["dir"] = str(base.get("dir") or "localdata/logs/pipeline").strip() or "localdata/logs/pipeline"
+    base["enabled"] = bool(base.get("enabled"))
+    base["file_enabled"] = bool(base.get("file_enabled"))
+    base["stdout"] = bool(base.get("stdout", True))
+    return base
 
 
 def _coerce_setting_value(pub_key: str, raw: Any, typ: type) -> Any:
@@ -276,6 +317,14 @@ def get_public_settings(app_config: dict | None, path: str = DEFAULT_PATH) -> di
                 _deep_get(merged, "collision_prefilter", "max_pose_gap_sec", 0.0) or 0.0
             ),
             "debug-info.enabled": bool(_deep_get(merged, "debug-info", "enabled", False)),
+            "pipeline_log.enabled": bool(_deep_get(merged, "pipeline_log", "enabled", False)),
+            "pipeline_log.file_enabled": bool(_deep_get(merged, "pipeline_log", "file_enabled", False)),
+            "pipeline_log.dir": str(
+                _deep_get(merged, "pipeline_log", "dir", "localdata/logs/pipeline")
+                or "localdata/logs/pipeline"
+            ),
+            "pipeline_log.sample": max(1, int(_deep_get(merged, "pipeline_log", "sample", 30) or 30)),
+            "pipeline_log.stdout": bool(_deep_get(merged, "pipeline_log", "stdout", True)),
         },
     }
 

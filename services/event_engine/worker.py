@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 
 import redis.asyncio as aioredis
 
@@ -23,6 +24,7 @@ from services.event_engine.event_log import (
     prefilter_log_enabled,
 )
 from services.event_engine.sharding import owns_camera, shard_config, shard_label
+from services.pipeline_log import log_pipeline_stage
 from services.pose_bus import (
     POSE_CHANNEL_PREFIX,
     POSE_STREAM_GROUP,
@@ -409,6 +411,14 @@ class EventRedisWorker:
         infer_w = int(pose.get("infer_width") or 0)
         infer_h = int(pose.get("infer_height") or 0)
         frame_idx = int(pose.get("frame_idx") or 0)
+        run_id = str(pose.get("run_id") or "").strip()
+        log_pipeline_stage(
+            "worker_received",
+            camera_id=camera_id,
+            frame_idx=frame_idx,
+            run_id=run_id or None,
+            persons=len(pose.get("persons") or []),
+        )
         processor = self._get_processor(camera_id, infer_w, infer_h)
         ctx = self._contexts.get(camera_id)
         if processor is None or ctx is None:
@@ -417,22 +427,43 @@ class EventRedisWorker:
         self._maybe_reset_on_frame_regression(camera_id, ctx, frame_idx)
         ctx.last_frame_idx = frame_idx
 
+        worker_started = time.monotonic()
         result = await asyncio.to_thread(processor.process, pose, ctx.prefilter)
+        worker_ms = round((time.monotonic() - worker_started) * 1000.0, 1)
         frame_idx = int(result.get("frame_idx") or pose.get("frame_idx") or 0)
         collisions = result.get("collisions") or []
         alarm_collisions = result.get("alarm_collisions") or []
         prefilter_logs = result.get("prefilter_logs") or []
         skeletons = result.get("skeletons")
 
+        log_pipeline_stage(
+            "worker_done",
+            camera_id=camera_id,
+            frame_idx=frame_idx,
+            run_id=run_id or None,
+            worker_ms=worker_ms,
+            hits=len(collisions),
+            alarms=len(alarm_collisions),
+        )
+
         self._log_event_frame(pose, collisions, alarm_collisions, prefilter_logs)
 
-        await asyncio.to_thread(
+        published = await asyncio.to_thread(
             publish_event_frame,
             camera_id,
             frame_idx=frame_idx,
             collisions=collisions,
             alarm_collisions=alarm_collisions,
             skeletons=skeletons,
+        )
+        log_pipeline_stage(
+            "event_published",
+            camera_id=camera_id,
+            frame_idx=frame_idx,
+            run_id=run_id or None,
+            published=published,
+            hits=len(collisions),
+            alarms=len(alarm_collisions),
         )
 
         if self.callback_reporter and alarm_collisions:
@@ -442,6 +473,15 @@ class EventRedisWorker:
                 shelf_code, box_id = parse_collision_token(collision)
                 if not box_id:
                     continue
+                log_pipeline_stage(
+                    "callback_enqueued",
+                    camera_id=camera_id,
+                    frame_idx=frame_idx,
+                    run_id=run_id or None,
+                    box_id=box_id,
+                    collision=collision,
+                    sample=False,
+                )
                 self.callback_reporter.enqueue_pick_finished(
                     box_id=box_id,
                     frame_idx=frame_idx,

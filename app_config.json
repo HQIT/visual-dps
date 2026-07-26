@@ -42,6 +42,13 @@
         "enabled": false,
         "interval_frames": 30
     },
+    "pipeline_log": {
+        "enabled": false,
+        "file_enabled": false,
+        "dir": "localdata/logs/pipeline",
+        "sample": 30,
+        "stdout": true
+    },
     "source": {
         "enabled": false,
         "stream_url": "",

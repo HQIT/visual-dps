@@ -365,6 +365,8 @@ def start_inference_container(camera: dict, request=None) -> dict:
             "services/inference_backends/__init__.py",
             "services/inference_backends/model_registry.py",
             "services/inference_backends/rtmpose_onnx_backend.py",
+            "services/pipeline_log.py",
+            "services/pose_bus.py",
         ):
             binds.append(_host_bind(rel, read_only=True))
     effective = get_effective_settings(app_config, camera)

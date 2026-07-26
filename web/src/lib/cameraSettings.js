@@ -78,6 +78,36 @@ export const CAMERA_OVERRIDE_FIELDS = [
   },
 ];
 
+/** 仅全局设置页：流水线阶段日志（infer / event-worker 读取） */
+export const GLOBAL_PIPELINE_LOG_FIELDS = [
+  {
+    key: 'pipeline_log.enabled',
+    label: '流水线阶段日志',
+    type: 'boolean',
+    hint: '记录采帧、推理发布、Worker 消费与事件发布等阶段（[PIPELINE] 行）。',
+    effectHint:
+      '保存后需重启 visual-dps-event-worker 与各推理容器（visual-dps-infer-*）。',
+  },
+  {
+    key: 'pipeline_log.file_enabled',
+    label: '写入日志文件',
+    type: 'boolean',
+    hint: '开启后将日志写入 localdata/logs/pipeline/ 下按角色命名的 .log 文件。',
+    effectHint:
+      '保存后需重启 visual-dps-event-worker 与各推理容器（visual-dps-infer-*）。',
+  },
+  {
+    key: 'pipeline_log.sample',
+    label: '日志采样间隔 (帧)',
+    type: 'number',
+    min: 1,
+    max: 600,
+    hint: '每 N 帧输出一条阶段日志；告警回调 enqueue 不受采样限制。',
+    effectHint:
+      '保存后需重启 visual-dps-event-worker 与各推理容器（visual-dps-infer-*）。',
+  },
+];
+
 /** 仅全局设置页：碰撞告警门控（event-worker 读取） */
 export const GLOBAL_COLLISION_FIELDS = [
   {

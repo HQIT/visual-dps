@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 import cv2
 import numpy as np
@@ -23,6 +24,7 @@ except Exception:
 
 from services.event_bus import get_event_snapshot
 from services.inference_backends import create_inference_backend, resolve_backend_name
+from services.pipeline_log import log_pipeline_stage
 from services.rtsp_capture import open_rtsp_capture, read_latest_frame
 
 
@@ -281,6 +283,7 @@ class InferenceService:
         cached_alarm_collisions = []
         inference_camera_id = os.environ.get("INFERENCE_CAMERA_ID", "").strip()
         headless_stream = is_stream and is_null_ws
+        infer_run_id = uuid.uuid4().hex[:12]
 
         try:
             while cap.isOpened() and self.state.is_inferencing:
@@ -295,8 +298,9 @@ class InferenceService:
                         await asyncio.sleep(sleep_skip)
                     continue
 
+                captured_at = 0.0
                 if is_stream:
-                    ret, frame, _captured_at = await asyncio.get_running_loop().run_in_executor(
+                    ret, frame, captured_at = await asyncio.get_running_loop().run_in_executor(
                         self._executor, _snapshot_stream_frame, cap
                     )
                 else:
@@ -323,14 +327,29 @@ class InferenceService:
                 else:
                     raw_frame = frame
 
+                det_ms: float | None = None
+                pose_ms: float | None = None
                 if run_pose or not headless_stream:
+                    det_started = time.monotonic()
                     cached_bboxes = await self._run_detection(raw_frame)
+                    det_ms = round((time.monotonic() - det_started) * 1000.0, 1)
 
                 if run_pose:
+                    if headless_stream and inference_camera_id:
+                        log_pipeline_stage(
+                            "rtsp_frame",
+                            camera_id=inference_camera_id,
+                            frame_idx=frame_count,
+                            run_id=infer_run_id,
+                            captured_at=round(captured_at, 3) if captured_at > 0 else None,
+                        )
+
                     skeletons_data = []
 
                     if len(cached_bboxes) > 0:
+                        pose_started = time.monotonic()
                         pose_batch = await self._run_pose(raw_frame, cached_bboxes)
+                        pose_ms = round((time.monotonic() - pose_started) * 1000.0, 1)
                         kpts_all = pose_batch.keypoints
                         scores_all = pose_batch.keypoint_scores
 
@@ -352,12 +371,22 @@ class InferenceService:
                     if is_null_ws and inference_camera_id:
                         from services.pose_bus import publish_pose_frame
 
+                        log_pipeline_stage(
+                            "infer_pose_done",
+                            camera_id=inference_camera_id,
+                            frame_idx=frame_count,
+                            run_id=infer_run_id,
+                            persons=len(skeletons_data),
+                            det_ms=det_ms,
+                            pose_ms=pose_ms,
+                        )
                         publish_pose_frame(
                             inference_camera_id,
                             frame_idx=frame_count,
                             persons=skeletons_data,
                             infer_width=infer_w,
                             infer_height=infer_h,
+                            run_id=infer_run_id,
                         )
 
                 skeletons_data = cached_skeletons_data

@@ -35,6 +35,12 @@ from services.camera_service import normalize_rtsp_url
 from services.inference_backends import resolve_backend_name
 from services.inference_backends.model_registry import resolve_det_variant
 from services.inference_service import InferenceService
+from services.pipeline_log import (
+    apply_pipeline_log_config,
+    configure_pipeline_logger,
+    log_pipeline_info,
+    pipeline_log_file_path,
+)
 
 
 def _apply_inference_env_overrides(app_config: dict) -> None:
@@ -115,6 +121,12 @@ async def _run_worker():
         raise SystemExit("INFERENCE_CAMERA_ID and INFERENCE_STREAM_URL are required")
 
     app_config = load_app_config()
+    apply_pipeline_log_config(app_config)
+    configure_pipeline_logger(role=f"infer_{camera_id}")
+    log_pipeline_info(
+        f"推理容器流水线日志 role=infer_{camera_id} file={pipeline_log_file_path() or 'stdout'}"
+    )
+
     _apply_inference_env_overrides(app_config)
     backend = resolve_backend_name(app_config)
     rtm_det = resolve_det_variant(app_config)

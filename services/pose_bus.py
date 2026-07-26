@@ -11,6 +11,8 @@ from typing import Any
 
 import redis as sync_redis
 
+from services.pipeline_log import log_pipeline_stage
+
 logger = logging.getLogger(__name__)
 
 POSE_CHANNEL_PREFIX = "pose:live:"
@@ -48,8 +50,9 @@ def build_pose_frame(
     persons: list,
     infer_width: int,
     infer_height: int,
+    run_id: str = "",
 ) -> dict[str, Any]:
-    return {
+    frame: dict[str, Any] = {
         "schema": POSE_SCHEMA_VERSION,
         "kind": "pose",
         "ts": time.time(),
@@ -59,6 +62,10 @@ def build_pose_frame(
         "infer_height": int(infer_height),
         "persons": list(persons),
     }
+    rid = str(run_id or "").strip()
+    if rid:
+        frame["run_id"] = rid
+    return frame
 
 
 def ensure_pose_stream_group(client: sync_redis.Redis | None = None) -> None:
@@ -83,6 +90,7 @@ def publish_pose_frame(
     persons: list,
     infer_width: int,
     infer_height: int,
+    run_id: str = "",
 ) -> bool:
     cid = str(camera_id or "").strip()
     if not cid:
@@ -93,6 +101,7 @@ def publish_pose_frame(
         persons=persons,
         infer_width=infer_width,
         infer_height=infer_height,
+        run_id=run_id,
     )
     payload = json.dumps(frame, ensure_ascii=False, separators=(",", ":"))
     try:
@@ -109,6 +118,14 @@ def publish_pose_frame(
         pipe.publish(channel_for(cid), payload)
         pipe.execute()
         client.close()
+        log_pipeline_stage(
+            "pose_published",
+            camera_id=cid,
+            frame_idx=frame_idx,
+            run_id=run_id or None,
+            persons=len(persons),
+            delivery=pose_delivery_mode(),
+        )
         return True
     except Exception as exc:
         logger.warning("Redis publish_pose_frame failed camera=%s: %s", cid, exc)

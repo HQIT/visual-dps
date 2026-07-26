@@ -5,7 +5,7 @@ import LogsPanel from '../components/LogsPanel';
 import ConfirmDialog from '../components/ConfirmDialog';
 import UserDrawer from '../components/UserDrawer';
 import FieldHint from '../components/FieldHint';
-import { CAMERA_OVERRIDE_FIELDS, GLOBAL_COLLISION_FIELDS, GLOBAL_PREFILTER_FIELDS, settingsFieldTooltip } from '../lib/cameraSettings';
+import { CAMERA_OVERRIDE_FIELDS, GLOBAL_COLLISION_FIELDS, GLOBAL_PIPELINE_LOG_FIELDS, GLOBAL_PREFILTER_FIELDS, settingsFieldTooltip } from '../lib/cameraSettings';
 import { InferenceModelGlobalFields } from '../components/InferenceModelFields';
 import { formatUserError } from '../lib/userFacingText';
 import './SettingsPage.css';
@@ -331,6 +331,48 @@ export default function SettingsPage() {
                   )}
                 </label>
               ))}
+              <h3 className="settings-subsection-title">流水线日志</h3>
+              {GLOBAL_PIPELINE_LOG_FIELDS.map((field) => {
+                const pipelineEnabled = Boolean(settings['pipeline_log.enabled']);
+                const disabled = field.key === 'pipeline_log.sample' && !pipelineEnabled;
+                return (
+                  <label key={field.key} className={disabled ? 'settings-field-disabled' : undefined}>
+                    <span className="settings-field-label">
+                      {field.label}
+                      <FieldHint text={settingsFieldTooltip(field)} />
+                    </span>
+                    {field.type === 'boolean' ? (
+                      <span className="settings-toggle-field">
+                        <span className="settings-toggle">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(settings[field.key])}
+                            disabled={disabled}
+                            onChange={(e) =>
+                              setSettings((s) => ({ ...s, [field.key]: e.target.checked }))
+                            }
+                          />
+                          <span className="settings-toggle-track" aria-hidden="true" />
+                        </span>
+                      </span>
+                    ) : (
+                      <input
+                        type="number"
+                        min={field.min}
+                        max={field.max}
+                        disabled={disabled}
+                        value={settings[field.key] ?? ''}
+                        onChange={(e) =>
+                          setSettings((s) => ({
+                            ...s,
+                            [field.key]: Number(e.target.value),
+                          }))
+                        }
+                      />
+                    )}
+                  </label>
+                );
+              })}
               <h3 className="settings-subsection-title">碰撞告警</h3>
               {GLOBAL_COLLISION_FIELDS.map((field) => (
                 <label key={field.key}>

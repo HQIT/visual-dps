@@ -24,7 +24,12 @@ from services.event_engine.event_log import (
     prefilter_log_enabled,
 )
 from services.event_engine.sharding import owns_camera, shard_config, shard_label
-from services.pipeline_log import log_pipeline_stage
+from services.pipeline_log import (
+    get_collision_logger,
+    get_prefilter_logger,
+    log_pipeline_stage,
+    reload_process_logging,
+)
 from services.pose_bus import (
     POSE_CHANNEL_PREFIX,
     POSE_STREAM_GROUP,
@@ -143,6 +148,7 @@ class EventRedisWorker:
         self._runtime_settings_mtime = mtime
         infer_cfg = get_merged_inference_section(self.app_config, path)
         self._apply_runtime_settings(infer_cfg)
+        reload_process_logging(self.app_config)
 
     def _resolve_json_path(self, camera_id: str) -> str:
         rel = camera_annotation_path(self._json_dir, camera_id)
@@ -237,10 +243,11 @@ class EventRedisWorker:
         ctx = event_log_context_from_pose(pose, self._video_fps)
 
         if prefilter_log_enabled():
+            prefilter_logger = get_prefilter_logger()
             for entry in prefilter_logs or []:
                 decision = entry.decision
                 tag = "FILTERED" if decision.blocked else "PASS"
-                print(
+                prefilter_logger.info(
                     format_event_log_line(
                         "PREFILTER",
                         tag,
@@ -254,34 +261,32 @@ class EventRedisWorker:
                         ankle_max_speed=decision.ankle_max_speed,
                         ankle_max_speed_norm=decision.ankle_max_speed_norm,
                         filtered=decision.blocked,
-                    ),
-                    flush=True,
+                    )
                 )
 
         if not collision_log_enabled():
             return
 
+        collision_logger = get_collision_logger()
         if collisions:
-            print(
+            collision_logger.info(
                 format_event_log_line(
                     "COLLISION",
                     "HIT",
                     ctx,
                     hits=collisions,
                     alarms=[],
-                ),
-                flush=True,
+                )
             )
         if alarm_collisions:
-            print(
+            collision_logger.info(
                 format_event_log_line(
                     "COLLISION",
                     "ALARM",
                     ctx,
                     hits=collisions,
                     alarms=alarm_collisions,
-                ),
-                flush=True,
+                )
             )
 
     async def start(self) -> None:

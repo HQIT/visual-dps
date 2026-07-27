@@ -24,7 +24,7 @@ except Exception:
 
 from services.event_bus import get_event_snapshot
 from services.inference_backends import create_inference_backend, resolve_backend_name
-from services.pipeline_log import log_pipeline_stage
+from services.pipeline_log import get_inference_logger, log_pipeline_stage, reload_process_logging
 from services.rtsp_capture import open_rtsp_capture, read_latest_frame
 
 
@@ -132,15 +132,28 @@ class InferenceService:
         self._perception_backend = None
         self._background_task = None
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="inference")
+        self._runtime_config_path = os.environ.get("RUNTIME_CONFIG_FILE", "localdata/runtime_config.json")
+        self._runtime_config_mtime: float | None = None
 
     def debug_visualization_enabled(self) -> bool:
         debug_cfg = self.app_config.get("debug-info", {})
         return isinstance(debug_cfg, dict) and bool(debug_cfg.get("enabled", False))
 
+    def _refresh_pipeline_log_if_needed(self) -> None:
+        path = self._runtime_config_path
+        try:
+            mtime = os.path.getmtime(path) if os.path.isfile(path) else 0.0
+        except OSError:
+            mtime = 0.0
+        if self._runtime_config_mtime == mtime:
+            return
+        self._runtime_config_mtime = mtime
+        reload_process_logging(self.app_config)
+
     def _backend(self):
         if self._perception_backend is None:
             backend_name = resolve_backend_name(self.app_config)
-            print(f"ℹ️ 推理后端: {backend_name}")
+            get_inference_logger().info(f"ℹ️ 推理后端: {backend_name}")
             self._perception_backend = create_inference_backend(self.app_config, self._executor)
         return self._perception_backend
 
@@ -192,16 +205,17 @@ class InferenceService:
 
         await websocket.accept()
         cap = None
+        infer_log = get_inference_logger()
 
         if self.state.source_type == "stream" and visualization_enabled and not self.state.is_inferencing:
             self.ensure_models_loaded()
             self.state.is_inferencing = True
-            print("✅ 已在网络流模式自动启动推理会话")
+            infer_log.info("✅ 已在网络流模式自动启动推理会话")
 
         json_file_path = self.state.json_path or self.app_config["paths"]["default_json_file"]
 
         if not os.path.exists(json_file_path):
-            print(f"⚠️ [警告] 无法启动推理：未找到配置文件 {json_file_path}，请先完成标注！")
+            infer_log.warning(f"⚠️ [警告] 无法启动推理：未找到配置文件 {json_file_path}，请先完成标注！")
             await websocket.close()
             return
 
@@ -214,7 +228,7 @@ class InferenceService:
         if self.state.source_type == "stream":
             marked_camera_url = str(source_info.get("camera_url", "") or "").strip()
             if marked_camera_url and marked_camera_url != (self.state.source_url or ""):
-                print(
+                infer_log.warning(
                     "⚠️ [警告] 当前流地址与标注来源摄像头不一致: "
                     f"stream={self.state.source_url} annotation_camera={marked_camera_url}"
                 )
@@ -223,7 +237,7 @@ class InferenceService:
         if is_stream:
             stream_buffer_size = int(self.app_config["inference"].get("stream_buffer_size", 1))
             cap = open_rtsp_capture(self.state.video_path, buffer_size=stream_buffer_size)
-            print("ℹ️ RTSP 采帧：后台线程刷新最新帧，推理仅消费快照副本")
+            infer_log.info("ℹ️ RTSP 采帧：后台线程刷新最新帧，推理仅消费快照副本")
         else:
             cap = cv2.VideoCapture(self.state.video_path)
 
@@ -232,7 +246,7 @@ class InferenceService:
         stream_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
         if stream_w <= 0 or stream_h <= 0:
-            print("⚠️ [警告] 无法读取当前视频分辨率，停止本次推理")
+            infer_log.warning("⚠️ [警告] 无法读取当前视频分辨率，停止本次推理")
             self.state.is_inferencing = False
             await websocket.close()
             if cap is not None:
@@ -266,7 +280,7 @@ class InferenceService:
             debug_interval_frames = 30
         debug_interval_frames = max(1, debug_interval_frames)
 
-        print(
+        infer_log.info(
             f"ℹ️ 推理参数: source={stream_w}x{stream_h} height={infer_h} "
             f"frame_rate={frame_rate} pose_frame_interval={pose_frame_interval} "
             f"resize={'on' if resize_needed else 'off'}"
@@ -276,6 +290,7 @@ class InferenceService:
         frame_count = 0
         inference_tick = 0
         last_frame_started_at = time.monotonic()
+        last_config_check_at = time.monotonic()
 
         cached_bboxes = np.empty((0, 4), dtype=np.float32)
         cached_skeletons_data = []
@@ -317,11 +332,14 @@ class InferenceService:
                         if sleep_wait > 0:
                             await asyncio.sleep(sleep_wait)
                         continue
-                    print("✅ 视频推理完成，停止当前会话")
+                    infer_log.info("✅ 视频推理完成，停止当前会话")
                     self.state.is_inferencing = False
                     break
 
                 frame_count += 1
+                if frame_count == 1 or frame_count % 300 == 0 or (time.monotonic() - last_config_check_at) >= 30.0:
+                    last_config_check_at = time.monotonic()
+                    self._refresh_pipeline_log_if_needed()
                 if resize_needed:
                     raw_frame = cv2.resize(frame, (infer_w, infer_h), interpolation=cv2.INTER_AREA)
                 else:
@@ -413,7 +431,7 @@ class InferenceService:
 
                 if debug_enabled and (frame_count % debug_interval_frames == 0):
                     resource_line = _collect_resource_debug_line(self.app_config["models"].get("device", ""))
-                    print(
+                    infer_log.info(
                         f"[DEBUG-INFO] frame={frame_count} fps={round(current_fps, 1)} "
                         f"video_time={formatted_time} {resource_line}"
                     )
@@ -459,7 +477,7 @@ class InferenceService:
 
         except WebSocketDisconnect:
             if not is_null_ws:
-                print("前端连接断开")
+                infer_log.info("前端连接断开")
         finally:
             self.state.is_inferencing = False
             if cap is not None:

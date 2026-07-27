@@ -79,22 +79,37 @@ export const CAMERA_OVERRIDE_FIELDS = [
 ];
 
 /** 仅全局设置页：流水线阶段日志（infer / event-worker 读取） */
+const PIPELINE_LOG_EFFECT_HINT =
+  'event-worker 保存后自动生效（开关/采样/stdout）；infer 容器同步热更新采样与开关。变更日志目录或轮转参数需重启 infer 容器与 event-worker。';
+
 export const GLOBAL_PIPELINE_LOG_FIELDS = [
   {
     key: 'pipeline_log.enabled',
     label: '流水线阶段日志',
     type: 'boolean',
     hint: '记录采帧、推理发布、Worker 消费与事件发布等阶段（[PIPELINE] 行）。',
-    effectHint:
-      '保存后需重启 visual-dps-event-worker 与各推理容器（visual-dps-infer-*）。',
+    effectHint: PIPELINE_LOG_EFFECT_HINT,
   },
   {
     key: 'pipeline_log.file_enabled',
     label: '写入日志文件',
     type: 'boolean',
-    hint: '开启后将日志写入 localdata/logs/pipeline/ 下按角色命名的 .log 文件。',
-    effectHint:
-      '保存后需重启 visual-dps-event-worker 与各推理容器（visual-dps-infer-*）。',
+    hint: '开启后将日志写入 pipeline 日志目录下按角色命名的 .log 文件（支持轮转）。',
+    effectHint: PIPELINE_LOG_EFFECT_HINT,
+  },
+  {
+    key: 'pipeline_log.stdout',
+    label: '输出到 stdout',
+    type: 'boolean',
+    hint: '开启后 docker logs 可见 [PIPELINE] 行；关闭且仅写文件时需在挂载目录 tail。',
+    effectHint: PIPELINE_LOG_EFFECT_HINT,
+  },
+  {
+    key: 'pipeline_log.dir',
+    label: '日志目录',
+    type: 'text',
+    hint: '相对项目根或容器 /app 的路径，默认 localdata/logs/pipeline。',
+    effectHint: PIPELINE_LOG_EFFECT_HINT,
   },
   {
     key: 'pipeline_log.sample',
@@ -103,8 +118,25 @@ export const GLOBAL_PIPELINE_LOG_FIELDS = [
     min: 1,
     max: 600,
     hint: '每 N 帧输出一条阶段日志；告警回调 enqueue 不受采样限制。',
-    effectHint:
-      '保存后需重启 visual-dps-event-worker 与各推理容器（visual-dps-infer-*）。',
+    effectHint: PIPELINE_LOG_EFFECT_HINT,
+  },
+  {
+    key: 'pipeline_log.max_bytes',
+    label: '单文件大小上限 (字节)',
+    type: 'number',
+    min: 1024,
+    max: 1073741824,
+    hint: 'RotatingFileHandler 单文件上限，默认 52428800（50MB）。',
+    effectHint: PIPELINE_LOG_EFFECT_HINT,
+  },
+  {
+    key: 'pipeline_log.backup_count',
+    label: '日志备份份数',
+    type: 'number',
+    min: 0,
+    max: 30,
+    hint: '轮转保留的历史文件数，0 表示仅覆盖当前文件。',
+    effectHint: PIPELINE_LOG_EFFECT_HINT,
   },
 ];
 

@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Any
 from urllib import error, request
 
+from services.pipeline_log import get_callback_logger, set_callback_reporting_enabled
 from services.wall_clock import epoch_ms, wall_time_str
 
 
@@ -83,9 +84,11 @@ class CollisionCallbackReporter:
         self._records: dict[str, ReportRecord] = {}
         self._last_sent_at_ms_by_key: dict[str, int] = {}
 
+        set_callback_reporting_enabled(self.enabled)
         if self.enabled and not self.callback_url:
-            print("⚠️ 回调上报已启用但 callback_url 为空，自动关闭上报")
+            get_callback_logger().warning("⚠️ 回调上报已启用但 callback_url 为空，自动关闭上报")
             self.enabled = False
+            set_callback_reporting_enabled(False)
 
     def _now_iso(self) -> str:
         # 与 wall_time_str 一致，使用容器 TZ（默认 Asia/Shanghai）
@@ -96,7 +99,7 @@ class CollisionCallbackReporter:
             return
         self._running = True
         self._worker_task = asyncio.create_task(self._worker_loop())
-        print("✅ 碰撞回调上报 worker 已启动")
+        get_callback_logger().info("✅ 碰撞回调上报 worker 已启动")
 
     async def stop(self):
         if not self._running:
@@ -110,7 +113,7 @@ class CollisionCallbackReporter:
             except asyncio.CancelledError:
                 pass
             self._worker_task = None
-        print("✅ 碰撞回调上报 worker 已停止")
+        get_callback_logger().info("✅ 碰撞回调上报 worker 已停止")
 
     def _record_to_dict(self, rec: ReportRecord) -> dict[str, Any]:
         return {
@@ -307,7 +310,8 @@ class CollisionCallbackReporter:
         rec.retry_count = 0
         rec.updated_at = self._now_iso()
 
-        print(
+        cb_log = get_callback_logger()
+        cb_log.info(
             f"[CALLBACK][SEND] time={wall_time_str()} event_id={event_id} url={self.callback_url} "
             f"finishTime={payload.get('finishTime')} payload={json.dumps(payload, ensure_ascii=False)}"
         )
@@ -327,7 +331,7 @@ class CollisionCallbackReporter:
                 summary="回调成功",
                 detail={"event_id": event_id, "http_status": http_status},
             )
-            print(
+            cb_log.info(
                 f"[CALLBACK][ACK] time={wall_time_str()} event_id={event_id} status={http_status} "
                 f"response={json.dumps(response_body, ensure_ascii=False)}"
             )
@@ -342,7 +346,7 @@ class CollisionCallbackReporter:
         is_client_error = http_status is not None and 400 <= http_status < 500
         if is_client_error:
             rec.status = "REJECT"
-            print(
+            cb_log.info(
                 f"[CALLBACK][REJECT] time={wall_time_str()} event_id={event_id} status={http_status} "
                 f"error={err} response={json.dumps(response_body, ensure_ascii=False)}"
             )
@@ -356,7 +360,7 @@ class CollisionCallbackReporter:
                 summary="回调失败",
                 detail={"event_id": event_id, "error": rec.error, "http_status": rec.http_status},
             )
-            print(
+            cb_log.info(
                 f"[CALLBACK][FAILED] time={wall_time_str()} event_id={event_id} status={rec.http_status} "
                 f"error={rec.error} response={json.dumps(rec.response_body, ensure_ascii=False)}"
             )

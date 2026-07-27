@@ -36,9 +36,8 @@ from services.inference_backends import resolve_backend_name
 from services.inference_backends.model_registry import resolve_det_variant
 from services.inference_service import InferenceService
 from services.pipeline_log import (
-    apply_pipeline_log_config,
-    configure_pipeline_logger,
-    log_pipeline_info,
+    configure_process_logging,
+    get_boot_logger,
     pipeline_log_file_path,
 )
 
@@ -121,9 +120,8 @@ async def _run_worker():
         raise SystemExit("INFERENCE_CAMERA_ID and INFERENCE_STREAM_URL are required")
 
     app_config = load_app_config()
-    apply_pipeline_log_config(app_config)
-    configure_pipeline_logger(role=f"infer_{camera_id}")
-    log_pipeline_info(
+    configure_process_logging(role=f"infer_{camera_id}", app_config=app_config)
+    get_boot_logger().info(
         f"推理容器流水线日志 role=infer_{camera_id} file={pipeline_log_file_path() or 'stdout'}"
     )
 

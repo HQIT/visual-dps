@@ -10,6 +10,7 @@ import numpy as np
 
 from services.inference_backends.base import PoseBatch
 from services.inference_backends.model_registry import YOLO_VARIANT_WEIGHTS
+from services.pipeline_log import get_inference_logger
 
 
 @dataclass
@@ -65,7 +66,8 @@ class YoloPoseBackend:
                 self.app_config.get("models", {}).get("yolo_pose_device") or "0"
             ).strip()
 
-        print(f"🚀 正在加载 {weight}（Ultralytics YOLO26-pose）…")
+        infer_log = get_inference_logger()
+        infer_log.info(f"🚀 正在加载 {weight}（Ultralytics YOLO26-pose）…")
         self._model = YOLO(weight)
         self._device = device
         if str(device).strip().lower() not in ("cpu", ""):
@@ -73,12 +75,12 @@ class YoloPoseBackend:
                 probe = np.zeros((64, 64, 3), dtype=np.uint8)
                 self._model.predict(probe, device=device, verbose=False, conf=0.99)
             except Exception as exc:
-                print(
+                infer_log.warning(
                     f"⚠️ YOLO CUDA 预热失败（{exc!r}），回退 CPU；"
                     "旧 Pascal GPU 请用 CPU 或换 Turing+ 测 GPU"
                 )
                 self._device = "cpu"
-        print(f"✅ YOLO26-{self._variant}-pose 已就绪: {weight} device={self._device}")
+        infer_log.info(f"✅ YOLO26-{self._variant}-pose 已就绪: {weight} device={self._device}")
 
     def _infer_sync(self, frame) -> _YoloFrameResult:
         self.ensure_loaded()

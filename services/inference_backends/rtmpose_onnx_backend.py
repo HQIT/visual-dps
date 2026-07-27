@@ -15,6 +15,7 @@ from services.inference_backends.model_registry import (
     resolve_rtm_assets,
 )
 from services.inference_backends.onnx_assets import ensure_onnx_from_zip
+from services.pipeline_log import get_inference_logger
 
 
 def _models_dir(app_config: dict) -> str:
@@ -49,7 +50,7 @@ def _preload_ort_cuda_dlls(device: str) -> None:
             except TypeError:
                 ort.preload_dlls()
     except Exception as exc:
-        print(f"⚠️ onnxruntime CUDA 库预加载失败: {exc}")
+        get_inference_logger().warning(f"⚠️ onnxruntime CUDA 库预加载失败: {exc}")
 
 
 def _ort_active_provider(onnx_path: str) -> str:
@@ -105,7 +106,8 @@ class RTMPoseOnnxBackend:
         det_input_size = (int(det_size[0]), int(det_size[1]))
         pose_input_size = (int(pose_size[0]), int(pose_size[1]))
 
-        print(
+        infer_log = get_inference_logger()
+        infer_log.info(
             f"🚀 正在加载 RTMDet-{self._det_variant.upper()} + RTMPose-{self._variant.upper()}（ONNX）…"
         )
         ensure_onnx_from_zip(det_path, det_url)
@@ -137,7 +139,7 @@ class RTMPoseOnnxBackend:
             if _is_cuda_device(device):
                 active = _ort_active_provider(det_path)
                 if active != "CUDAExecutionProvider":
-                    print(
+                    infer_log.warning(
                         f"⚠️ ORT 实际 EP={active}（期望 CUDAExecutionProvider），回退 CPU"
                     )
                     device = "cpu"
@@ -147,7 +149,7 @@ class RTMPoseOnnxBackend:
         except Exception as exc:
             if not _is_cuda_device(device):
                 raise
-            print(
+            infer_log.warning(
                 f"⚠️ RTMPose ONNX CUDA 初始化失败（{exc!r}），回退 CPU；"
                 "旧 Pascal GPU（如 GTX 1080）请用 CPU 或换 Turing+ 显卡测 GPU"
             )
@@ -156,7 +158,7 @@ class RTMPoseOnnxBackend:
             self._pose = None
             _load_models(device)
 
-        print(
+        infer_log.info(
             f"✅ RTMDet-{self._det_variant.upper()} + RTMPose-{self._variant.upper()} ONNX 已就绪: "
             f"det={det_path} pose={pose_path} device={device}"
         )

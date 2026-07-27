@@ -334,7 +334,8 @@ export default function SettingsPage() {
               <h3 className="settings-subsection-title">流水线日志</h3>
               {GLOBAL_PIPELINE_LOG_FIELDS.map((field) => {
                 const pipelineEnabled = Boolean(settings['pipeline_log.enabled']);
-                const disabled = field.key === 'pipeline_log.sample' && !pipelineEnabled;
+                const disabled =
+                  field.key === 'pipeline_log.sample' && !pipelineEnabled;
                 return (
                   <label key={field.key} className={disabled ? 'settings-field-disabled' : undefined}>
                     <span className="settings-field-label">
@@ -355,6 +356,15 @@ export default function SettingsPage() {
                           <span className="settings-toggle-track" aria-hidden="true" />
                         </span>
                       </span>
+                    ) : field.type === 'text' ? (
+                      <input
+                        type="text"
+                        disabled={disabled}
+                        value={settings[field.key] ?? ''}
+                        onChange={(e) =>
+                          setSettings((s) => ({ ...s, [field.key]: e.target.value }))
+                        }
+                      />
                     ) : (
                       <input
                         type="number"

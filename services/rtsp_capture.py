@@ -13,6 +13,7 @@ import numpy as np
 
 from services.hwaccel_probe import probe_ffmpeg_decode_profile, probe_summary
 from services.latest_frame_buffer import LatestFrameBuffer
+from services.pipeline_log import get_inference_logger
 
 _DEFAULT_FFMPEG_OPTS = "rtsp_transport;tcp|fflags;nobuffer|flags;low_delay|max_delay;0"
 _LOW_LATENCY_FFMPEG_OPTS = os.environ.get("OPENCV_FFMPEG_CAPTURE_OPTIONS", _DEFAULT_FFMPEG_OPTS)
@@ -255,7 +256,7 @@ class _OpencvRtspCapture:
             else:
                 fail_streak += 1
                 if fail_streak >= _RTSP_RECONNECT_FAIL_STREAK:
-                    print(f"⚠️ RTSP 读帧连续失败，重连: {self.url}")
+                    get_inference_logger().warning(f"⚠️ RTSP 读帧连续失败，重连: {self.url}")
                     fail_streak = 0
                     cap = self._reconnect_cv_cap()
                     if cap is None:
@@ -332,27 +333,28 @@ class _OpencvCaptureAdapter:
 
 
 def open_rtsp_capture(url: str, buffer_size: int = 1):
+    infer_log = get_inference_logger()
     mode = _backend_mode()
     if mode == "ffmpeg":
         cap = _FfmpegRtspCapture(url)
         if cap.open():
             ok, frame = cap.read()
             if ok and frame is not None:
-                print(f"ℹ️ RTSP 采帧: ffmpeg 后台最新帧 ({probe_summary()})")
+                infer_log.info(f"ℹ️ RTSP 采帧: ffmpeg 后台最新帧 ({probe_summary()})")
                 return cap
             cap.release()
-            print(
+            infer_log.warning(
                 "⚠️ FFmpeg 采帧无首帧（常见：缺 libnvcuvid 导致 NVDEC 失败），回退 OpenCV"
             )
         else:
-            print("⚠️ FFmpeg RTSP 打开失败，回退 OpenCV")
+            infer_log.warning("⚠️ FFmpeg RTSP 打开失败，回退 OpenCV")
 
     cap = _OpencvRtspCapture(url, buffer_size=buffer_size)
     if cap.open():
-        print(f"ℹ️ RTSP 采帧: opencv 后台最新帧 ({probe_summary()})")
+        infer_log.info(f"ℹ️ RTSP 采帧: opencv 后台最新帧 ({probe_summary()})")
         return cap
     cap.release()
-    print("⚠️ OpenCV 后台读帧启动失败，回退同步 OpenCV")
+    infer_log.warning("⚠️ OpenCV 后台读帧启动失败，回退同步 OpenCV")
     apply_low_latency_ffmpeg_env()
     cv_cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
     try:

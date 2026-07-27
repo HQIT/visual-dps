@@ -40,6 +40,8 @@ PUBLIC_KEYS = {
     "pipeline_log.dir": ("pipeline_log", "dir", str),
     "pipeline_log.sample": ("pipeline_log", "sample", int),
     "pipeline_log.stdout": ("pipeline_log", "stdout", bool),
+    "pipeline_log.max_bytes": ("pipeline_log", "max_bytes", int),
+    "pipeline_log.backup_count": ("pipeline_log", "backup_count", int),
 }
 
 # 仅全局设置页暴露，event-worker 读取；不支持按摄像头覆盖
@@ -61,6 +63,8 @@ GLOBAL_ONLY_KEYS = frozenset(
         "pipeline_log.dir",
         "pipeline_log.sample",
         "pipeline_log.stdout",
+        "pipeline_log.max_bytes",
+        "pipeline_log.backup_count",
     }
 )
 
@@ -173,6 +177,8 @@ def _default_pipeline_log_section() -> dict:
         "dir": "localdata/logs/pipeline",
         "sample": 30,
         "stdout": True,
+        "max_bytes": 52_428_800,
+        "backup_count": 5,
     }
 
 
@@ -194,6 +200,14 @@ def get_pipeline_log_section(app_config: dict | None = None, path: str = DEFAULT
     base["enabled"] = bool(base.get("enabled"))
     base["file_enabled"] = bool(base.get("file_enabled"))
     base["stdout"] = bool(base.get("stdout", True))
+    try:
+        base["max_bytes"] = max(1024, int(base.get("max_bytes") or 52_428_800))
+    except (TypeError, ValueError):
+        base["max_bytes"] = 52_428_800
+    try:
+        base["backup_count"] = max(0, int(base.get("backup_count") if base.get("backup_count") is not None else 5))
+    except (TypeError, ValueError):
+        base["backup_count"] = 5
     return base
 
 
@@ -325,6 +339,12 @@ def get_public_settings(app_config: dict | None, path: str = DEFAULT_PATH) -> di
             ),
             "pipeline_log.sample": max(1, int(_deep_get(merged, "pipeline_log", "sample", 30) or 30)),
             "pipeline_log.stdout": bool(_deep_get(merged, "pipeline_log", "stdout", True)),
+            "pipeline_log.max_bytes": max(
+                1024, int(_deep_get(merged, "pipeline_log", "max_bytes", 52_428_800) or 52_428_800)
+            ),
+            "pipeline_log.backup_count": max(
+                0, int(_deep_get(merged, "pipeline_log", "backup_count", 5) if _deep_get(merged, "pipeline_log", "backup_count", 5) is not None else 5)
+            ),
         },
     }
 
@@ -346,6 +366,10 @@ def patch_public_settings(updates: dict, path: str = DEFAULT_PATH) -> dict:
                 val = _coerce_alarm_min(raw)
             elif pub_key == "inference.alarm_cooldown_frames":
                 val = _coerce_alarm_cooldown(raw)
+            elif pub_key == "pipeline_log.max_bytes":
+                val = max(1024, int(raw))
+            elif pub_key == "pipeline_log.backup_count":
+                val = max(0, int(raw))
             elif pub_key == "collision_prefilter.max_pose_gap_sec":
                 val = max(0.0, float(raw))
             elif pub_key.startswith("collision_prefilter.") and typ is float:

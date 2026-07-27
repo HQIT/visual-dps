@@ -16,7 +16,7 @@ from services.inference_backends.model_registry import (
 
 _LITE_BACKENDS = LITE_BACKEND_FAMILIES
 from services.annotation_service import ensure_camera_annotation_file
-from services.runtime_config_service import get_effective_settings
+from services.runtime_config_service import effective_pipeline_log_enabled, get_effective_settings
 
 INFERENCE_CONTAINER_PREFIX = os.environ.get("INFERENCE_CONTAINER_PREFIX", "visual-dps-infer-")
 INFERENCE_IMAGE = os.environ.get("INFERENCE_IMAGE", "").strip()
@@ -391,6 +391,7 @@ def start_inference_container(camera: dict, request=None) -> dict:
         "INFERENCE_HEIGHT": str(effective.get("inference.height", 480)),
         "INFERENCE_POSE_FRAME_INTERVAL": str(effective.get("inference.pose_frame_interval", 3)),
         "INFERENCE_DEBUG_VISUAL": "1" if effective.get("debug-info.enabled") else "0",
+        "PIPELINE_LOG": "1" if effective_pipeline_log_enabled(app_config, camera) else "0",
         "RTSP_CAPTURE_BACKEND": rtsp_backend,
         "RTSP_FRAME_BUFFER_TTL_SEC": os.environ.get("RTSP_FRAME_BUFFER_TTL_SEC", "1").strip() or "1",
         # 与 event-worker 的 POSE_DELIVERY=stream 对齐（推理 XADD pose:stream）

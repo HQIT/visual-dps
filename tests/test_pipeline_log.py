@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import tempfile
@@ -17,11 +18,25 @@ def _reset_process_logging() -> None:
     pipeline_log._config_loaded = False
     pipeline_log._file_handler_attached = False
     pipeline_log._active_file_config_key = None
+    pipeline_log._invalidate_camera_pipeline_cache()
     for name in pipeline_log._ALL_LOGGER_NAMES:
         logger = logging.getLogger(name)
         for handler in logger.handlers[:]:
             handler.close()
             logger.removeHandler(handler)
+
+
+def _write_inference_status(tmp: str, camera_id: str, *, state: str = "running") -> None:
+    status_dir = os.path.join(tmp, "inference")
+    os.makedirs(status_dir, exist_ok=True)
+    path = os.path.join(status_dir, f"{camera_id}.status.json")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(
+            json.dumps(
+                {"camera_id": camera_id, "state": state, "is_inferencing": state == "running"},
+                ensure_ascii=False,
+            )
+        )
 
 
 class PipelineLogTests(unittest.TestCase):
@@ -32,23 +47,43 @@ class PipelineLogTests(unittest.TestCase):
         _reset_process_logging()
 
     def test_disabled_by_default(self):
-        with patch.dict(os.environ, {}, clear=True):
-            pipeline_log.configure_process_logging(role="worker", app_config={"pipeline_log": {"enabled": False}})
-            self.assertFalse(pipeline_log.pipeline_log_enabled())
-            pipeline_log.log_pipeline_stage("pose_published", camera_id="cam1", frame_idx=1)
-            self.assertEqual(logging.getLogger(pipeline_log._LOGGER_PIPELINE).handlers, [])
+        with tempfile.TemporaryDirectory() as tmp:
+            app_config = {
+                "paths": {
+                    "camera_ips_file": os.path.join(tmp, "camera_ips.json"),
+                    "base_localdata_dir": tmp,
+                },
+                "pipeline_log": {"enabled": False, "file_enabled": True, "dir": tmp, "stdout": False},
+            }
+            with open(app_config["paths"]["camera_ips_file"], "w", encoding="utf-8") as f:
+                json.dump([], f)
+            with patch.dict(os.environ, {}, clear=True):
+                pipeline_log.configure_process_logging(role="worker", app_config=app_config)
+                self.assertFalse(pipeline_log.pipeline_log_enabled())
+                self.assertFalse(pipeline_log.pipeline_log_process_active())
+                pipeline_log.log_pipeline_stage("pose_published", camera_id="cam1", frame_idx=1)
+                log_path = os.path.join(tmp, "worker.log")
+                content = open(log_path, encoding="utf-8").read() if os.path.isfile(log_path) else ""
+                self.assertNotIn("stage=pose_published", content)
 
     def test_config_enables_file_output(self):
         with tempfile.TemporaryDirectory() as tmp:
             app_config = {
+                "paths": {
+                    "camera_ips_file": os.path.join(tmp, "camera_ips.json"),
+                    "base_localdata_dir": tmp,
+                },
                 "pipeline_log": {
                     "enabled": True,
                     "file_enabled": True,
                     "stdout": False,
                     "dir": tmp,
                     "sample": 1,
-                }
+                },
             }
+            with open(app_config["paths"]["camera_ips_file"], "w", encoding="utf-8") as f:
+                json.dump([{"id": "cam1", "name": "cam1", "url": "rtsp://x/cam1"}], f)
+            _write_inference_status(tmp, "cam1")
             with patch.dict(os.environ, {}, clear=True):
                 pipeline_log.configure_process_logging(role="worker", app_config=app_config)
                 pipeline_log.log_pipeline_stage(
@@ -138,6 +173,103 @@ class PipelineLogTests(unittest.TestCase):
                 self.assertEqual(len(file_handlers), 1)
                 self.assertEqual(file_handlers[0].maxBytes, 2048)
                 self.assertEqual(file_handlers[0].backupCount, 2)
+
+    def test_worker_skips_when_inference_inactive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app_config = {
+                "paths": {
+                    "camera_ips_file": os.path.join(tmp, "camera_ips.json"),
+                    "base_localdata_dir": tmp,
+                },
+                "pipeline_log": {
+                    "enabled": True,
+                    "file_enabled": True,
+                    "stdout": False,
+                    "dir": tmp,
+                    "sample": 1,
+                },
+            }
+            with open(app_config["paths"]["camera_ips_file"], "w", encoding="utf-8") as f:
+                json.dump([{"id": "cam1", "name": "cam1", "url": "rtsp://x/cam1"}], f)
+            with patch.dict(os.environ, {}, clear=True):
+                pipeline_log.configure_process_logging(role="worker", app_config=app_config)
+                pipeline_log.log_pipeline_stage("worker_received", camera_id="cam1", frame_idx=1)
+                log_path = os.path.join(tmp, "worker.log")
+                content = open(log_path, encoding="utf-8").read() if os.path.isfile(log_path) else ""
+                self.assertNotIn("stage=worker_received", content)
+
+    def test_worker_skips_when_camera_pipeline_disabled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app_config = {
+                "paths": {
+                    "camera_ips_file": os.path.join(tmp, "camera_ips.json"),
+                    "base_localdata_dir": tmp,
+                },
+                "pipeline_log": {
+                    "enabled": True,
+                    "file_enabled": True,
+                    "stdout": False,
+                    "dir": tmp,
+                    "sample": 1,
+                },
+            }
+            with open(app_config["paths"]["camera_ips_file"], "w", encoding="utf-8") as f:
+                json.dump(
+                    [
+                        {
+                            "id": "cam1",
+                            "name": "cam1",
+                            "url": "rtsp://x/cam1",
+                            "settings": {"pipeline_log.enabled": False},
+                        }
+                    ],
+                    f,
+                )
+            _write_inference_status(tmp, "cam1")
+            with patch.dict(os.environ, {}, clear=True):
+                pipeline_log.configure_process_logging(role="worker", app_config=app_config)
+                pipeline_log.log_pipeline_stage("worker_received", camera_id="cam1", frame_idx=1)
+                log_path = os.path.join(tmp, "worker.log")
+                content = open(log_path, encoding="utf-8").read() if os.path.isfile(log_path) else ""
+                self.assertNotIn("stage=worker_received", content)
+
+    def test_worker_logs_when_global_off_camera_on(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app_config = {
+                "paths": {
+                    "camera_ips_file": os.path.join(tmp, "camera_ips.json"),
+                    "base_localdata_dir": tmp,
+                },
+                "pipeline_log": {
+                    "enabled": False,
+                    "file_enabled": True,
+                    "stdout": False,
+                    "dir": tmp,
+                    "sample": 1,
+                },
+            }
+            with open(app_config["paths"]["camera_ips_file"], "w", encoding="utf-8") as f:
+                json.dump(
+                    [
+                        {
+                            "id": "cam1",
+                            "path": "cam1",
+                            "name": "cam1",
+                            "url": "rtsp://127.0.0.1/cam1",
+                            "source_type": "external",
+                            "settings": {"pipeline_log.enabled": True},
+                        }
+                    ],
+                    f,
+                )
+            _write_inference_status(tmp, "cam1")
+            with patch.dict(os.environ, {}, clear=True):
+                pipeline_log.configure_process_logging(role="worker", app_config=app_config)
+                self.assertFalse(pipeline_log.pipeline_log_enabled())
+                self.assertTrue(pipeline_log.pipeline_log_process_active())
+                pipeline_log.log_pipeline_stage("worker_received", camera_id="cam1", frame_idx=1)
+                content = open(os.path.join(tmp, "worker.log"), encoding="utf-8").read()
+                self.assertIn("stage=worker_received", content)
 
 
 if __name__ == "__main__":

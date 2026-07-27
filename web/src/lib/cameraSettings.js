@@ -76,6 +76,14 @@ export const CAMERA_OVERRIDE_FIELDS = [
     hint: '开启后推理容器周期性输出 [DEBUG-INFO]（帧率、资源等）。不影响监控页画面与骨架叠加，生产环境建议关闭。',
     effectHint: '保存后需重新「启动智能检测」（visual-dps-infer-{摄像头ID} 推理容器）。',
   },
+  {
+    key: 'pipeline_log.enabled',
+    label: '流水线阶段日志',
+    type: 'boolean',
+    hint: '记录该路采帧、推理发布及 Worker 消费阶段（[PIPELINE]）。显式开启时优先于全局默认（全局默认关）；关闭可减轻 worker.log 积压。',
+    effectHint:
+      '保存后需重新「启动智能检测」；Worker 侧会随 camera_ips.json 热更新，infer 侧需重启容器。',
+  },
 ];
 
 /** 仅全局设置页：流水线阶段日志（infer / event-worker 读取） */
@@ -96,10 +104,10 @@ export const PIPELINE_LOG_SYSTEM_DEFAULTS = {
 export const GLOBAL_PIPELINE_LOG_FIELDS = [
   {
     key: 'pipeline_log.enabled',
-    label: '流水线阶段日志',
+    label: '流水线阶段日志（未自定义摄像头的默认值）',
     type: 'boolean',
     default: PIPELINE_LOG_SYSTEM_DEFAULTS['pipeline_log.enabled'],
-    hint: '记录采帧、推理发布、Worker 消费与事件发布等阶段（[PIPELINE] 行）。',
+    hint: '未在摄像头页单独配置的路是否默认记录 [PIPELINE]；默认关。某路在摄像头页显式开启时不受此项限制。',
     effectHint: PIPELINE_LOG_EFFECT_HINT,
   },
   {

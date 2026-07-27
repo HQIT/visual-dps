@@ -58,7 +58,6 @@ GLOBAL_ONLY_KEYS = frozenset(
         "collision_prefilter.stance_feature",
         "collision_prefilter.stance_threshold",
         "collision_prefilter.max_pose_gap_sec",
-        "pipeline_log.enabled",
         "pipeline_log.file_enabled",
         "pipeline_log.dir",
         "pipeline_log.sample",
@@ -78,6 +77,7 @@ CAMERA_OVERRIDE_KEYS = {
         "inference.height",
         "inference.pose_frame_interval",
         "debug-info.enabled",
+        "pipeline_log.enabled",
     )
 }
 
@@ -180,6 +180,20 @@ def _default_pipeline_log_section() -> dict:
         "max_bytes": 52_428_800,
         "backup_count": 5,
     }
+
+
+def effective_pipeline_log_enabled(
+    app_config: dict | None,
+    camera: dict | None,
+    path: str = DEFAULT_PATH,
+) -> bool:
+    """该路是否输出 [PIPELINE]：摄像头 settings 显式配置优先，否则继承全局默认（默认关）。"""
+    section = get_pipeline_log_section(app_config, path)
+    global_default = bool(section.get("enabled"))
+    overrides = normalize_camera_settings((camera or {}).get("settings"))
+    if "pipeline_log.enabled" in overrides:
+        return bool(overrides["pipeline_log.enabled"])
+    return global_default
 
 
 def get_pipeline_log_section(app_config: dict | None = None, path: str = DEFAULT_PATH) -> dict:

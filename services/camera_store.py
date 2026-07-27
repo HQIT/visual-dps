@@ -115,7 +115,11 @@ def load_cameras(camera_file: str) -> List[dict]:
     items = []
     seen = set()
     for raw in data:
-        rec = _normalize_record(raw) if raw.get("source_type") or raw.get("path") else _legacy_to_record(raw)
+        rec = (
+            _normalize_record(raw)
+            if (raw.get("source_type") or raw.get("path") or raw.get("id"))
+            else _legacy_to_record(raw)
+        )
         if not rec or rec["id"] in seen:
             continue
         seen.add(rec["id"])

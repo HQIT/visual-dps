@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
@@ -9,7 +10,11 @@ import threading
 from logging.handlers import RotatingFileHandler
 from typing import Any
 
-from services.runtime_config_service import DEFAULT_PATH, get_pipeline_log_section
+from services.runtime_config_service import (
+    DEFAULT_PATH,
+    effective_pipeline_log_enabled,
+    get_pipeline_log_section,
+)
 from services.wall_clock import wall_time_str
 
 _LOGGER_PIPELINE = "visual_dps.pipeline"
@@ -47,6 +52,10 @@ _settings: dict[str, Any] = {
     "max_bytes": 52_428_800,
     "backup_count": 5,
 }
+
+_camera_log_cache: dict[str, bool] = {}
+_camera_ips_mtime: float | None = None
+_inference_active_cache: dict[str, tuple[float, bool]] = {}
 
 # 每帧阶段（采样输出，避免刷屏）
 _FRAME_STAGES = frozenset(
@@ -155,28 +164,47 @@ def apply_pipeline_log_config(
     _config_loaded = True
     _configured = False
 
+    _invalidate_camera_pipeline_cache()
     _clear_logger_handlers(_get_logger(_LOGGER_PIPELINE))
 
     return dict(_settings)
 
 
 def pipeline_log_enabled() -> bool:
+    """全局默认开关（未自定义的摄像头继承此值；默认关）。"""
     if _config_loaded:
         return bool(_settings.get("enabled"))
     return _truthy(os.environ.get("PIPELINE_LOG"))
 
 
-def pipeline_log_file_enabled() -> bool:
-    if not pipeline_log_enabled():
+def _any_camera_pipeline_log_enabled() -> bool:
+    path = _camera_ips_file()
+    if not os.path.isfile(path):
         return False
+    from services.camera_store import load_cameras
+
+    for cam in load_cameras(path):
+        if effective_pipeline_log_enabled(_app_config, cam, path=_runtime_path):
+            return True
+    return False
+
+
+def pipeline_log_process_active() -> bool:
+    """当前进程是否应启用 [PIPELINE] logger（infer 看 env；worker 看全局默认或任一路摄像头开启）。"""
+    if str(_role or "").startswith("infer_"):
+        return pipeline_log_enabled()
+    if pipeline_log_enabled():
+        return True
+    return _any_camera_pipeline_log_enabled()
+
+
+def pipeline_log_file_enabled() -> bool:
     if _config_loaded:
         return bool(_settings.get("file_enabled"))
     return _truthy(os.environ.get("PIPELINE_LOG_FILE"))
 
 
 def pipeline_log_stdout_enabled() -> bool:
-    if not pipeline_log_enabled():
-        return False
     if _config_loaded:
         return bool(_settings.get("stdout", True))
     raw = os.environ.get("PIPELINE_LOG_STDOUT", "1").strip().lower()
@@ -201,12 +229,115 @@ def pipeline_log_sample_every() -> int:
 
 
 def sample_hit(frame_idx: int) -> bool:
-    if not pipeline_log_enabled():
-        return False
     fi = int(frame_idx or 0)
     if fi <= 0:
         return True
     return (fi % pipeline_log_sample_every()) == 0
+
+
+def _invalidate_camera_pipeline_cache() -> None:
+    global _camera_ips_mtime, _camera_log_cache, _inference_active_cache
+    _camera_ips_mtime = None
+    _camera_log_cache = {}
+    _inference_active_cache = {}
+
+
+def _camera_ips_file() -> str:
+    if _app_config:
+        paths = _app_config.get("paths") or {}
+        return str(paths.get("camera_ips_file") or "localdata/camera_ips.json")
+    return os.environ.get("CAMERA_IPS_FILE", "localdata/camera_ips.json")
+
+
+def _inference_status_dir() -> str:
+    if _app_config:
+        base = str((_app_config.get("paths") or {}).get("base_localdata_dir") or "localdata")
+        return os.path.join(base, "inference")
+    return os.environ.get("INFERENCE_STATUS_DIR", "localdata/inference")
+
+
+def _refresh_camera_log_cache() -> None:
+    global _camera_log_cache, _camera_ips_mtime
+
+    path = _camera_ips_file()
+    try:
+        mtime = os.path.getmtime(path) if os.path.isfile(path) else 0.0
+    except OSError:
+        mtime = 0.0
+    if _camera_ips_mtime == mtime and _camera_log_cache:
+        return
+
+    _camera_ips_mtime = mtime
+    cache: dict[str, bool] = {}
+    if os.path.isfile(path):
+        from services.camera_store import load_cameras
+
+        for cam in load_cameras(path):
+            cid = str(cam.get("id") or "").strip()
+            if not cid:
+                continue
+            cache[cid] = effective_pipeline_log_enabled(_app_config, cam, path=_runtime_path)
+    _camera_log_cache = cache
+
+
+def camera_pipeline_log_enabled(camera_id: str) -> bool:
+    """该路摄像头是否允许输出 [PIPELINE]（摄像头显式配置优先于全局默认）。"""
+    cid = str(camera_id or "").strip()
+    if not cid:
+        return pipeline_log_process_active()
+    if str(_role or "").startswith("infer_"):
+        return pipeline_log_enabled()
+    _refresh_camera_log_cache()
+    if cid in _camera_log_cache:
+        return _camera_log_cache[cid]
+    return pipeline_log_enabled()
+
+
+def inference_session_active(camera_id: str) -> bool:
+    """推理容器是否在运行（读 localdata/inference/{id}.status.json）。"""
+    cid = str(camera_id or "").strip()
+    if not cid:
+        return False
+    if str(_role or "").startswith("infer_"):
+        return True
+
+    status_dir = _inference_status_dir()
+    path = os.path.join(status_dir, f"{cid}.status.json")
+    try:
+        mtime = os.path.getmtime(path) if os.path.isfile(path) else -1.0
+    except OSError:
+        mtime = -1.0
+
+    cached = _inference_active_cache.get(cid)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+
+    active = False
+    if mtime >= 0:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                state = str(data.get("state") or "").strip().lower()
+                inferencing = data.get("is_inferencing")
+                active = state == "running" and inferencing is not False
+        except (OSError, json.JSONDecodeError, TypeError):
+            active = False
+
+    _inference_active_cache[cid] = (mtime, active)
+    return active
+
+
+def should_log_pipeline_for_camera(camera_id: str) -> bool:
+    """Worker 侧：该路 effective 开 + infer 容器 running。"""
+    cid = str(camera_id or "").strip()
+    if not cid:
+        return pipeline_log_process_active()
+    if not camera_pipeline_log_enabled(cid):
+        return False
+    if not inference_session_active(cid):
+        return False
+    return True
 
 
 def _get_logger(name: str = _LOGGER_PIPELINE) -> logging.Logger:
@@ -306,12 +437,13 @@ def _configure_handlers(*, allow_file_rebuild: bool = True) -> None:
     _setup_logger(_LOGGER_BOOT, level=logging.INFO, stdout=True, file_handler=shared_file)
     _setup_logger(_LOGGER_INFERENCE, level=logging.INFO, stdout=True, file_handler=shared_file)
 
-    pipeline_stdout = pipeline_log_stdout_enabled() if pipeline_log_enabled() else False
+    pipeline_active = pipeline_log_process_active()
+    pipeline_stdout = pipeline_log_stdout_enabled() if pipeline_active else False
     _setup_logger(
         _LOGGER_PIPELINE,
-        level=logging.INFO if pipeline_log_enabled() else logging.CRITICAL + 1,
+        level=logging.INFO if pipeline_active else logging.CRITICAL + 1,
         stdout=pipeline_stdout,
-        file_handler=shared_file if pipeline_log_enabled() and want_file else None,
+        file_handler=shared_file if pipeline_active and want_file else None,
     )
 
     _setup_logger(
@@ -418,6 +550,17 @@ def _format_line(stage: str, *, camera_id: str, frame_idx: int, **fields: Any) -
     return f"[PIPELINE] {body}"
 
 
+def _ensure_pipeline_handlers() -> None:
+    """camera_ips 热更新后，若任一路开启流水线日志则补挂 handler。"""
+    if not _configured or not pipeline_log_process_active():
+        return
+    pipeline_logger = _get_logger(_LOGGER_PIPELINE)
+    if pipeline_logger.isEnabledFor(logging.INFO) and pipeline_logger.handlers:
+        return
+    with _lock:
+        _configure_handlers(allow_file_rebuild=not _file_handler_attached)
+
+
 def log_pipeline_stage(
     stage: str,
     *,
@@ -427,8 +570,13 @@ def log_pipeline_stage(
     **fields: Any,
 ) -> None:
     """记录流水线阶段；帧级 stage 默认按 sample 配置采样。"""
-    if not pipeline_log_enabled():
+    cid = str(camera_id or "").strip()
+    if cid:
+        if not should_log_pipeline_for_camera(cid):
+            return
+    elif not pipeline_log_process_active():
         return
+    _ensure_pipeline_handlers()
     if sample and stage in _FRAME_STAGES and not sample_hit(frame_idx):
         return
 
@@ -438,6 +586,7 @@ def log_pipeline_stage(
 
 def log_pipeline_info(message: str) -> None:
     """非采样信息（启动、配置等）。"""
-    if not pipeline_log_enabled():
+    if not pipeline_log_process_active():
         return
+    _ensure_pipeline_handlers()
     _get_logger(_LOGGER_PIPELINE).info(f"[PIPELINE] {message}")

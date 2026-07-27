@@ -61,7 +61,9 @@ export default function CameraSetupDrawer({
           fallback ??
           (key === 'debug-info.enabled'
             ? false
-            : key === 'models.backend'
+            : key === 'pipeline_log.enabled'
+              ? false
+              : key === 'models.backend'
               ? 'rtmpose_t'
               : ''),
       });

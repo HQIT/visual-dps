@@ -7,6 +7,7 @@ localdata/last_frame.jpg
 localdata/camera_ips.json
 localdata/auth_users.json
 localdata/auth_config.json
+localdata/runtime_config.json
 localdata/logs/
 localdata/frames/
 localdata/inference/

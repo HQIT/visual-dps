@@ -1,22 +1,8 @@
 __pycache__/
 *.py[cod]
 .env
-localdata/upload/
-localdata/upload/480p/
-localdata/last_frame.jpg
-localdata/camera_ips.json
-localdata/auth_users.json
-localdata/auth_config.json
-localdata/logs/
-localdata/frames/
-localdata/inference/
-localdata/models/
-localdata/benchmark
-localdata/mediamtx.yml
-localdata/json/cameras/
-localdata/upload_counter.txt
-localdata/json/annotation_*.json
-localdata/json/*_boxes.json
+# 运行时数据（摄像头、标注、日志、模型权重等），不入库
+localdata/
 docker-compose.override.yml
 *.mp4
 *.avi

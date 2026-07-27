@@ -73,7 +73,10 @@ w = helper.make_tensor(
 )
 conv = helper.make_node("Conv", ["x", "w"], ["y"], kernel_shape=[3, 3], strides=[2, 2], pads=[1, 1, 1, 1])
 graph = helper.make_graph([conv], "t", [X], [Y], [w])
-model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 13)])
+# opset 11 + IR≤10：兼容 onnxruntime 1.20.x（不支持 IR 13 / opset 13 探针）
+model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 11)])
+if model.ir_version > 10:
+    model.ir_version = 9
 
 sess = ort.InferenceSession(
     model.SerializeToString(),

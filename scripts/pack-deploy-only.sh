@@ -81,10 +81,16 @@ for rel in \
   services/hwaccel_probe.py \
   services/nvidia_pip_cuda.py \
   services/rtsp_capture.py \
+  services/pipeline_log.py \
+  services/pose_bus.py \
+  services/runtime_config_service.py \
   services/inference_backends/__init__.py \
   services/inference_backends/model_registry.py \
-  services/inference_backends/rtmpose_onnx_backend.py
+  services/inference_backends/rtmpose_onnx_backend.py \
+  services/inference_backends/onnx_assets.py \
+  services/inference_backends/yolo_pose_backend.py
 do
+  mkdir -p "${APP}/$(dirname "${rel}")"
   cp "${ROOT}/${rel}" "${APP}/${rel}"
 done
 

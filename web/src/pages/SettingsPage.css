@@ -97,15 +97,54 @@
   color: #c7d6e2;
 }
 
+.settings-subsection-lead {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 0.78rem;
+  color: #7a92a8;
+  line-height: 1.45;
+}
+
+.settings-subsection-lead strong {
+  color: #9ab1c4;
+  font-weight: 600;
+}
+
+.settings-subsection-lead code {
+  font-size: 0.72rem;
+  color: #00d4aa;
+}
+
+.settings-field-default {
+  font-size: 0.72rem;
+  color: #6d8496;
+  line-height: 1.35;
+}
+
+.settings-field-default strong {
+  color: #9ab1c4;
+  font-weight: 600;
+}
+
+.settings-field-disabled {
+  opacity: 0.55;
+}
+
 .settings-toggle-field {
   display: flex;
   align-items: center;
+  gap: 10px;
   height: var(--settings-control-height);
   padding: 0 10px;
   border-radius: 6px;
   border: 1px solid #3a4f5f;
   background: #0f1419;
   box-sizing: border-box;
+}
+
+.settings-toggle-state {
+  font-size: 0.82rem;
+  color: #9ab1c4;
 }
 
 .settings-toggle {

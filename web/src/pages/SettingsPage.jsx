@@ -5,7 +5,7 @@ import LogsPanel from '../components/LogsPanel';
 import ConfirmDialog from '../components/ConfirmDialog';
 import UserDrawer from '../components/UserDrawer';
 import FieldHint from '../components/FieldHint';
-import { CAMERA_OVERRIDE_FIELDS, GLOBAL_COLLISION_FIELDS, GLOBAL_PIPELINE_LOG_FIELDS, GLOBAL_PREFILTER_FIELDS, settingsFieldTooltip } from '../lib/cameraSettings';
+import { CAMERA_OVERRIDE_FIELDS, GLOBAL_COLLISION_FIELDS, GLOBAL_PIPELINE_LOG_FIELDS, GLOBAL_PREFILTER_FIELDS, formatFieldDefaultValue, resolveSettingValue, settingsFieldTooltip } from '../lib/cameraSettings';
 import { InferenceModelGlobalFields } from '../components/InferenceModelFields';
 import { formatUserError } from '../lib/userFacingText';
 import './SettingsPage.css';
@@ -332,10 +332,19 @@ export default function SettingsPage() {
                 </label>
               ))}
               <h3 className="settings-subsection-title">流水线日志</h3>
+              <p className="settings-subsection-lead">
+                各字段下方标注<strong>系统默认值</strong>；未配置或与默认相同时，后端按该值运行。
+              </p>
               {GLOBAL_PIPELINE_LOG_FIELDS.map((field) => {
-                const pipelineEnabled = Boolean(settings['pipeline_log.enabled']);
+                const pipelineEnabled = Boolean(
+                  resolveSettingValue(
+                    settings,
+                    GLOBAL_PIPELINE_LOG_FIELDS.find((f) => f.key === 'pipeline_log.enabled'),
+                  ),
+                );
                 const disabled =
                   field.key === 'pipeline_log.sample' && !pipelineEnabled;
+                const currentVal = resolveSettingValue(settings, field);
                 return (
                   <label key={field.key} className={disabled ? 'settings-field-disabled' : undefined}>
                     <span className="settings-field-label">
@@ -347,7 +356,7 @@ export default function SettingsPage() {
                         <span className="settings-toggle">
                           <input
                             type="checkbox"
-                            checked={Boolean(settings[field.key])}
+                            checked={Boolean(currentVal)}
                             disabled={disabled}
                             onChange={(e) =>
                               setSettings((s) => ({ ...s, [field.key]: e.target.checked }))
@@ -355,12 +364,16 @@ export default function SettingsPage() {
                           />
                           <span className="settings-toggle-track" aria-hidden="true" />
                         </span>
+                        <span className="settings-toggle-state">
+                          {Boolean(currentVal) ? '开' : '关'}
+                        </span>
                       </span>
                     ) : field.type === 'text' ? (
                       <input
                         type="text"
                         disabled={disabled}
-                        value={settings[field.key] ?? ''}
+                        placeholder={String(field.default ?? '')}
+                        value={currentVal}
                         onChange={(e) =>
                           setSettings((s) => ({ ...s, [field.key]: e.target.value }))
                         }
@@ -371,7 +384,8 @@ export default function SettingsPage() {
                         min={field.min}
                         max={field.max}
                         disabled={disabled}
-                        value={settings[field.key] ?? ''}
+                        placeholder={String(field.default ?? '')}
+                        value={currentVal}
                         onChange={(e) =>
                           setSettings((s) => ({
                             ...s,
@@ -380,6 +394,9 @@ export default function SettingsPage() {
                         }
                       />
                     )}
+                    <span className="settings-field-default">
+                      系统默认 <strong>{formatFieldDefaultValue(field)}</strong>
+                    </span>
                   </label>
                 );
               })}

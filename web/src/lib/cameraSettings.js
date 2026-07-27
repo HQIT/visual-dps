@@ -82,11 +82,23 @@ export const CAMERA_OVERRIDE_FIELDS = [
 const PIPELINE_LOG_EFFECT_HINT =
   'event-worker 保存后自动生效（开关/采样/stdout）；infer 容器同步热更新采样与开关。变更日志目录或轮转参数需重启 infer 容器与 event-worker。';
 
+/** 与 services/runtime_config_service._default_pipeline_log_section 对齐 */
+export const PIPELINE_LOG_SYSTEM_DEFAULTS = {
+  'pipeline_log.enabled': false,
+  'pipeline_log.file_enabled': false,
+  'pipeline_log.stdout': true,
+  'pipeline_log.dir': 'localdata/logs/pipeline',
+  'pipeline_log.sample': 30,
+  'pipeline_log.max_bytes': 52_428_800,
+  'pipeline_log.backup_count': 5,
+};
+
 export const GLOBAL_PIPELINE_LOG_FIELDS = [
   {
     key: 'pipeline_log.enabled',
     label: '流水线阶段日志',
     type: 'boolean',
+    default: PIPELINE_LOG_SYSTEM_DEFAULTS['pipeline_log.enabled'],
     hint: '记录采帧、推理发布、Worker 消费与事件发布等阶段（[PIPELINE] 行）。',
     effectHint: PIPELINE_LOG_EFFECT_HINT,
   },
@@ -94,6 +106,7 @@ export const GLOBAL_PIPELINE_LOG_FIELDS = [
     key: 'pipeline_log.file_enabled',
     label: '写入日志文件',
     type: 'boolean',
+    default: PIPELINE_LOG_SYSTEM_DEFAULTS['pipeline_log.file_enabled'],
     hint: '开启后将日志写入 pipeline 日志目录下按角色命名的 .log 文件（支持轮转）。',
     effectHint: PIPELINE_LOG_EFFECT_HINT,
   },
@@ -101,6 +114,7 @@ export const GLOBAL_PIPELINE_LOG_FIELDS = [
     key: 'pipeline_log.stdout',
     label: '输出到 stdout',
     type: 'boolean',
+    default: PIPELINE_LOG_SYSTEM_DEFAULTS['pipeline_log.stdout'],
     hint: '开启后 docker logs 可见 [PIPELINE] 行；关闭且仅写文件时需在挂载目录 tail。',
     effectHint: PIPELINE_LOG_EFFECT_HINT,
   },
@@ -108,7 +122,8 @@ export const GLOBAL_PIPELINE_LOG_FIELDS = [
     key: 'pipeline_log.dir',
     label: '日志目录',
     type: 'text',
-    hint: '相对项目根或容器 /app 的路径，默认 localdata/logs/pipeline。',
+    default: PIPELINE_LOG_SYSTEM_DEFAULTS['pipeline_log.dir'],
+    hint: '相对项目根或容器 /app 的路径。',
     effectHint: PIPELINE_LOG_EFFECT_HINT,
   },
   {
@@ -117,6 +132,7 @@ export const GLOBAL_PIPELINE_LOG_FIELDS = [
     type: 'number',
     min: 1,
     max: 600,
+    default: PIPELINE_LOG_SYSTEM_DEFAULTS['pipeline_log.sample'],
     hint: '每 N 帧输出一条阶段日志；告警回调 enqueue 不受采样限制。',
     effectHint: PIPELINE_LOG_EFFECT_HINT,
   },
@@ -126,7 +142,9 @@ export const GLOBAL_PIPELINE_LOG_FIELDS = [
     type: 'number',
     min: 1024,
     max: 1073741824,
-    hint: 'RotatingFileHandler 单文件上限，默认 52428800（50MB）。',
+    default: PIPELINE_LOG_SYSTEM_DEFAULTS['pipeline_log.max_bytes'],
+    defaultLabel: '52428800（50MB）',
+    hint: 'RotatingFileHandler 单文件上限，超出后轮转。',
     effectHint: PIPELINE_LOG_EFFECT_HINT,
   },
   {
@@ -135,6 +153,7 @@ export const GLOBAL_PIPELINE_LOG_FIELDS = [
     type: 'number',
     min: 0,
     max: 30,
+    default: PIPELINE_LOG_SYSTEM_DEFAULTS['pipeline_log.backup_count'],
     hint: '轮转保留的历史文件数，0 表示仅覆盖当前文件。',
     effectHint: PIPELINE_LOG_EFFECT_HINT,
   },
@@ -296,6 +315,22 @@ export function formatSettingDisplayValue(field, value) {
     return opt?.shortLabel || opt?.label || String(value);
   }
   return String(value);
+}
+
+/** 设置页展示字段的系统默认值（优先 defaultLabel） */
+export function formatFieldDefaultValue(field) {
+  if (!field) return '—';
+  if (field.defaultLabel) return field.defaultLabel;
+  const fallback = field.default ?? PIPELINE_LOG_SYSTEM_DEFAULTS[field.key];
+  return formatSettingDisplayValue(field, fallback);
+}
+
+/** 读取设置项当前值，缺省时回落到字段 default */
+export function resolveSettingValue(settings, field) {
+  const raw = settings?.[field.key];
+  if (raw !== undefined && raw !== null && raw !== '') return raw;
+  if (field.default !== undefined) return field.default;
+  return field.type === 'boolean' ? false : '';
 }
 
 export function backendLabel(value) {

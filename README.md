@@ -43,31 +43,40 @@
 
 ### pipeline_log — 推理流水线阶段日志
 
-用于观测 **RTSP 采帧 → 推理发布 pose → Event Worker 消费 → 事件发布 / 回调入队** 各阶段行为。日志行前缀为 `[PIPELINE]`，由 `services/pipeline_log.py` 统一管理（Python `logging`）。
+用于观测 **RTSP 采帧 → 推理发布 pose → Event Worker 消费 → 事件发布 / 回调入队** 各阶段行为。推理链路（infer 容器、event-worker、RTSP/后端/回调）**统一经 Python `logging` 输出**，由 `services/pipeline_log.py` 配置各 logger 的 Handler；`[PIPELINE]` 行前缀表示流水线阶段 trace。
+
+**输出机制（均为 logging，非 print）**：
+
+| Handler | 配置项 | 去向 |
+|---------|--------|------|
+| `StreamHandler` → stdout | `stdout` | `docker logs` 可见 |
+| `RotatingFileHandler` | `file_enabled` + `dir` | `{dir}/{role}.log`（如 `worker.log`、`infer_cam1.log`） |
+
+二者可同时挂载：`stdout=true` 且 `file_enabled=true` 时，同一条 `[PIPELINE]` 既进容器日志又落盘。仅当 `enabled=true` 时才会产生 `[PIPELINE]` 行。
 
 **配置优先级**（高 → 低）：`localdata/runtime_config.json` → `app_config.json` → 环境变量 `PIPELINE_LOG*`。  
 **设置页**：全局配置 → 流水线日志（与下表字段一一对应）。
 
 | 字段 | 含义 |
 |------|------|
-| `enabled` | 是否记录 `[PIPELINE]` 阶段日志（默认 `false`） |
-| `file_enabled` | 是否写入日志文件（与 stdout 可同时开启） |
-| `stdout` | 是否输出到 stdout（`docker logs` 可见；默认 `true`，需 `enabled=true` 才有 pipeline 行） |
-| `dir` | 日志目录，默认 `localdata/logs/pipeline` |
+| `enabled` | 是否记录 `[PIPELINE]` 阶段日志（默认 `false`；关则无任何 pipeline 阶段行） |
+| `stdout` | 是否为 `[PIPELINE]` 挂载 stdout Handler（默认 `true`；`docker logs` 可见；需 `enabled=true`） |
+| `file_enabled` | 是否为 `[PIPELINE]` 挂载文件 Handler（RotatingFileHandler；可与 stdout 同时开启） |
+| `dir` | 文件 Handler 的目录，默认 `localdata/logs/pipeline` |
 | `sample` | 帧级 stage 采样间隔：每 N 帧输出一条（默认 `30`）；`callback_enqueued` 不受采样限制 |
 | `max_bytes` | 单文件大小上限（字节），默认 `52428800`（50MB），超出后轮转 |
 | `backup_count` | 轮转保留的历史文件数，默认 `5`；`0` 表示仅覆盖当前文件 |
 
 环境变量可临时覆盖（便于排障）：`PIPELINE_LOG`、`PIPELINE_LOG_FILE`、`PIPELINE_LOG_DIR`、`PIPELINE_LOG_SAMPLE`、`PIPELINE_LOG_STDOUT`、`PIPELINE_LOG_MAX_BYTES`、`PIPELINE_LOG_BACKUP_COUNT`。
 
-**日志文件路径**（`file_enabled=true` 时）：
+**日志文件路径**（`enabled=true` 且 `file_enabled=true` 时）：
 
 | 进程 | 文件 |
 |------|------|
 | Event Worker | `{dir}/worker.log` |
 | 推理容器 camX | `{dir}/infer_camX.log` |
 
-**热生效**：设置页保存后，event-worker 与 infer 容器对 **开关 / 采样 / stdout** 可热更新；变更 **dir / max_bytes / backup_count** 需重启 event-worker 与各 `visual-dps-infer-*`。
+**热生效**：设置页保存后，event-worker 与 infer 容器对 **enabled / 采样 / stdout** 可热更新（重建 logging Handler）；变更 **dir / max_bytes / backup_count** 需重启 event-worker 与各 `visual-dps-infer-*`。
 
 **示例**（`app_config.json`）：
 
@@ -110,15 +119,17 @@
 
 跨进程对齐：`camera` + `frame` + `run_id`（推理会话启动时生成的 12 位 hex，随 pose 传递）。
 
-**相关但非 `[PIPELINE]` 的日志**（同模块 `pipeline_log.py`，开关独立）：
+**相关但非 `[PIPELINE]` 的日志**（同属 `pipeline_log.py` 的 logging logger，Handler/开关独立；**同样不是 print**）：
 
-| 前缀 / Logger | 环境变量或条件 | 内容 |
-|---------------|----------------|------|
-| 启动提示 | 始终 | `visual_dps.boot`：进程启停、delivery 模式 |
-| 推理运行时 | 始终 | `visual_dps.inference`：模型加载、RTSP 回退、推理参数 |
-| `[COLLISION]` | `COLLISION_LOG=1` | 碰撞 HIT / 告警 ALARM |
-| `[PREFILTER]` | `PREFILTER_LOG=1` 或 `COLLISION_LOG=1` | 前置门控 PASS / FILTERED |
-| `[CALLBACK]` | `reporting.enabled` | Java 回调 SEND / ACK / FAILED |
+| 前缀 / Logger | 环境变量或条件 | 输出 | 内容 |
+|---------------|----------------|------|------|
+| 启动提示 | 始终 | 固定 stdout | `visual_dps.boot`：进程启停、delivery 模式 |
+| 推理运行时 | 始终 | 固定 stdout | `visual_dps.inference`：模型加载、RTSP 回退、推理参数 |
+| `[COLLISION]` | `COLLISION_LOG=1` | stdout（+ 可选文件） | 碰撞 HIT / 告警 ALARM |
+| `[PREFILTER]` | `PREFILTER_LOG=1` 或 `COLLISION_LOG=1` | stdout（+ 可选文件） | 前置门控 PASS / FILTERED |
+| `[CALLBACK]` | `reporting.enabled` | stdout（+ 可选文件） | Java 回调 SEND / ACK / FAILED |
+
+开启 `file_enabled` 时，collision/prefilter/callback 等与 `[PIPELINE]` 共用同一 `{role}.log`，按行前缀区分。
 
 ### source — 启动时视频源
 

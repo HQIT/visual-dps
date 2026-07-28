@@ -362,6 +362,7 @@ def start_inference_container(camera: dict, request=None) -> dict:
             "services/hwaccel_probe.py",
             "services/nvidia_pip_cuda.py",
             "services/rtsp_capture.py",
+            "services/wall_clock.py",
             "services/inference_backends/__init__.py",
             "services/inference_backends/model_registry.py",
             "services/inference_backends/rtmpose_onnx_backend.py",
@@ -372,6 +373,8 @@ def start_inference_container(camera: dict, request=None) -> dict:
             "services/runtime_config_service.py",
         ):
             binds.append(_host_bind(rel, read_only=True))
+    if os.path.isfile("/etc/localtime"):
+        binds.append("/etc/localtime:/etc/localtime:ro")
     effective = get_effective_settings(app_config, camera)
     preset = resolve_model_preset(app_config, overrides=effective)
     infer_image, _family = _resolve_inference_image(client, preset.family)

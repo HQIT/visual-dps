@@ -7,6 +7,7 @@ INFER_BIND_MOUNT_FILES=(
   services/hwaccel_probe.py
   services/nvidia_pip_cuda.py
   services/rtsp_capture.py
+  services/wall_clock.py
   services/pipeline_log.py
   services/pose_bus.py
   services/runtime_config_service.py

@@ -11,12 +11,11 @@ import json
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any
 from urllib import error, request
 
 from services.pipeline_log import get_callback_logger, set_callback_reporting_enabled
-from services.wall_clock import epoch_ms, wall_time_str
+from services.wall_clock import epoch_ms, wall_datetime, wall_time_str
 
 
 @dataclass
@@ -91,8 +90,8 @@ class CollisionCallbackReporter:
             set_callback_reporting_enabled(False)
 
     def _now_iso(self) -> str:
-        # 与 wall_time_str 一致，使用容器 TZ（默认 Asia/Shanghai）
-        return datetime.now().astimezone().isoformat(timespec="seconds")
+        # 与 wall_time_str 一致（services.wall_clock 统一 TZ）
+        return wall_datetime().isoformat(timespec="seconds")
 
     async def start(self):
         if not self.enabled or self._running:

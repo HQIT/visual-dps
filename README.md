@@ -100,7 +100,7 @@
 
 | 字段 | 含义 |
 |------|------|
-| `time` | 墙钟时间（容器 TZ，默认 Asia/Shanghai） |
+| `time` | 墙钟时间（`services/wall_clock.py` 统一 TZ，默认 `Asia/Shanghai`；无 tzdata 时 UTC+8） |
 | `stage` | 流水线阶段名（见下表） |
 | `camera` | 摄像头 ID |
 | `frame` | 帧序号 |

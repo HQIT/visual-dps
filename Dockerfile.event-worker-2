@@ -1,0 +1,42 @@
+# 事件 Worker-2：pick_state（v5_gated）替代硬规则碰撞。
+# 构建: docker compose build visual-dps-event-worker-2
+# 与 visual-dps-event-worker 共用 pose:stream / event-workers；勿同时启动抢消息。
+
+FROM python:3.10-slim
+
+ARG APT_MIRROR=mirrors.aliyun.com
+ARG PIP_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    POSE_DELIVERY=stream \
+    PICK_STATE_CONFIG=pick_state/configs/pipeline.v5_gated.json
+
+WORKDIR /app
+
+COPY docker/debian-mirror.sh /tmp/debian-mirror.sh
+RUN sh /tmp/debian-mirror.sh "${APT_MIRROR}" && rm /tmp/debian-mirror.sh
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY docker/pip-install.sh /tmp/pip-install.sh
+COPY requirements-pick-state.txt /tmp/requirements-pick-state.txt
+RUN sh /tmp/pip-install.sh "${PIP_INDEX}" --upgrade pip \
+    && sh /tmp/pip-install.sh "${PIP_INDEX}" \
+        opencv-python-headless \
+        numpy \
+        redis \
+        -r /tmp/requirements-pick-state.txt \
+    && rm -f /tmp/pip-install.sh /tmp/requirements-pick-state.txt
+
+COPY services ./services
+COPY core ./core
+COPY pick_state ./pick_state
+COPY event_worker_2.py ./event_worker_2.py
+COPY app_config.json ./app_config.json
+
+CMD ["python", "event_worker_2.py"]

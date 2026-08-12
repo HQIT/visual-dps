@@ -31,7 +31,8 @@ docker compose up -d
 | redis | visual-dps-redis | 姿态/事件总线 |
 | mediamtx | visual-dps-mediamtx | RTSP/HLS/WebRTC |
 | visual-dps-ui | visual-dps-ui | Web + API（管理推理容器） |
-| visual-dps-event-worker | visual-dps-event-worker | 碰撞/报警/Java 回调 |
+| visual-dps-event-worker | visual-dps-event-worker | 碰撞/报警/Java 回调（硬规则） |
+| visual-dps-event-worker-2 | visual-dps-event-worker-2 | pick_state 备选；**profile `worker-2`**，与上者勿同时跑。见 [DEPLOY-EVENT-WORKER-2.md](./DEPLOY-EVENT-WORKER-2.md) |
 
 推理容器 **不** 常驻 compose 内：在总览页「开启检测」时由 UI 通过 Docker API 拉起，与上述服务同属 `visual-dps-internal` 网络。
 

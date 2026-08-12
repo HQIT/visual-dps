@@ -135,6 +135,42 @@ services:
       - /etc/localtime:/etc/localtime:ro
     restart: unless-stopped
 
+
+  # pick_state 备选 worker；与上者共用 pose:stream / event-workers。
+  # 默认不随 compose up 启动。切换：先 stop event-worker，再:
+  #   docker compose --profile worker-2 up -d visual-dps-event-worker-2
+  visual-dps-event-worker-2:
+    profiles: ["worker-2"]
+    build:
+      context: .
+      dockerfile: Dockerfile.event-worker-2
+      args: *china-build-args
+    image: visual-dps-event-worker-2:${VISUAL_DPS_IMAGE_TAG:-latest}
+    container_name: visual-dps-event-worker-2
+    depends_on:
+      - redis
+      - mediamtx
+    networks:
+      - visual-dps-internal
+    environment:
+      - NO_PROXY=localhost,127.0.0.1,::1,mediamtx,redis,visual-dps-ui,visual-dps-event-worker,visual-dps-event-worker-2,172.16.0.0/12,172.17.0.0/16,172.18.0.0/16,10.0.0.0/8
+      - no_proxy=localhost,127.0.0.1,::1,mediamtx,redis,visual-dps-ui,visual-dps-event-worker,visual-dps-event-worker-2,172.16.0.0/12,172.17.0.0/16,172.18.0.0/16,10.0.0.0/8
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - JSON_DIR=/app/localdata/json
+      - POSE_DELIVERY=stream
+      - POSE_STREAM_KEY=pose:stream
+      - POSE_STREAM_GROUP=event-workers
+      - PICK_STATE_CONFIG=pick_state/configs/pipeline.v5_gated.json
+      - EVENT_WORKER_ENABLE_CALLBACKS=${EVENT_WORKER_ENABLE_CALLBACKS:-1}
+      - COLLISION_LOG=${COLLISION_LOG:-0}
+      - TZ=${TZ:-Asia/Shanghai}
+    volumes:
+      - ./app_config.json:/app/app_config.json:ro
+      - ./localdata:/app/localdata
+      - /etc/localtime:/etc/localtime:ro
+    restart: unless-stopped
+
   # 以下为推理镜像构建目标（不会随 compose up 自动启动；由 UI 按摄像头 docker run）
   # 镜像 tag 由构建脚本注入 VISUAL_DPS_IMAGE_TAG（见 AGENTS.md / scripts/lib/docker-image-tag.sh）
   visual-dps-inference-lite:

@@ -6,38 +6,7 @@ services:
     image: redis:7
     container_name: visual-dps-redis
     command: redis-server --requirepass ${REDIS_PASSWORD}
-    
-  # pick_state 备选；与 event-worker 共用 group，勿同时跑。
-  # docker compose --profile worker-2 up -d visual-dps-event-worker-2
-  visual-dps-event-worker-2:
-    profiles: ["worker-2"]
-    image: visual-dps-event-worker-2:${VISUAL_DPS_IMAGE_TAG:-latest}
-    container_name: visual-dps-event-worker-2
-    depends_on:
-      - redis
-      - mediamtx
     networks:
-      - visual-dps-internal
-    environment:
-      - NO_PROXY=localhost,127.0.0.1,::1,mediamtx,redis,visual-dps-ui,visual-dps-event-worker,visual-dps-event-worker-2,172.16.0.0/12,172.17.0.0/16,172.18.0.0/16,10.0.0.0/8
-      - no_proxy=localhost,127.0.0.1,::1,mediamtx,redis,visual-dps-ui,visual-dps-event-worker,visual-dps-event-worker-2,172.16.0.0/12,172.17.0.0/16,172.18.0.0/16,10.0.0.0/8
-      - REDIS_PASSWORD=${REDIS_PASSWORD}
-      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
-      - JSON_DIR=/app/localdata/json
-      - POSE_DELIVERY=stream
-      - POSE_STREAM_KEY=pose:stream
-      - POSE_STREAM_GROUP=event-workers
-      - PICK_STATE_CONFIG=pick_state/configs/pipeline.v5_gated.json
-      - EVENT_WORKER_ENABLE_CALLBACKS=${EVENT_WORKER_ENABLE_CALLBACKS:-1}
-      - COLLISION_LOG=${COLLISION_LOG:-0}
-      - TZ=${TZ:-Asia/Shanghai}
-    volumes:
-      - ./app_config.json:/app/app_config.json:ro
-      - ./localdata:/app/localdata
-      - /etc/localtime:/etc/localtime:ro
-    restart: unless-stopped
-
-networks:
       - visual-dps-internal
     restart: unless-stopped
 
@@ -133,6 +102,38 @@ networks:
     volumes:
       - ./app_config.json:/app/app_config.json:ro
       - ./localdata:/app/localdata
+    restart: unless-stopped
+
+
+  # pick_state 备选 worker；与 visual-dps-event-worker 共用 pose:stream / event-workers。
+  # 默认不启动。生产对照：先 stop event-worker，再:
+  #   docker compose -f docker-compose.deploy.yml --profile worker-2 up -d visual-dps-event-worker-2
+  visual-dps-event-worker-2:
+    profiles: ["worker-2"]
+    image: visual-dps-event-worker-2:${VISUAL_DPS_IMAGE_TAG:-latest}
+    container_name: visual-dps-event-worker-2
+    depends_on:
+      - redis
+      - mediamtx
+    networks:
+      - visual-dps-internal
+    environment:
+      - NO_PROXY=localhost,127.0.0.1,::1,mediamtx,redis,visual-dps-ui,visual-dps-event-worker,visual-dps-event-worker-2,172.16.0.0/12,172.17.0.0/16,172.18.0.0/16,10.0.0.0/8
+      - no_proxy=localhost,127.0.0.1,::1,mediamtx,redis,visual-dps-ui,visual-dps-event-worker,visual-dps-event-worker-2,172.16.0.0/12,172.17.0.0/16,172.18.0.0/16,10.0.0.0/8
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - JSON_DIR=/app/localdata/json
+      - POSE_DELIVERY=stream
+      - POSE_STREAM_KEY=pose:stream
+      - POSE_STREAM_GROUP=event-workers
+      - PICK_STATE_CONFIG=pick_state/configs/pipeline.v5_gated.json
+      - EVENT_WORKER_ENABLE_CALLBACKS=${EVENT_WORKER_ENABLE_CALLBACKS:-1}
+      - COLLISION_LOG=${COLLISION_LOG:-0}
+      - TZ=${TZ:-Asia/Shanghai}
+    volumes:
+      - ./app_config.json:/app/app_config.json:ro
+      - ./localdata:/app/localdata
+      - /etc/localtime:/etc/localtime:ro
     restart: unless-stopped
 
 networks:

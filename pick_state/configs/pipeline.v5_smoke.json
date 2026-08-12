@@ -1,0 +1,43 @@
+{
+  "name": "v5_smoke",
+  "description": "容器联调：关 A/B 门控，便于合成骨架出告警",
+  "pose_frame_interval": 2,
+  "pick_state": {
+    "scorer": "rule_expert"
+  },
+  "pair_state": {
+    "enabled": true,
+    "scorer": "linear_expert",
+    "threshold": 0.20,
+    "score_smooth": {
+      "enabled": true,
+      "window_frames": 5,
+      "method": "ema",
+      "ema_alpha": 0.4
+    },
+    "linear_expert": {
+      "model_path": "models/v5_base/model.json"
+    },
+    "action_gate": {
+      "enabled": false,
+      "threshold": 0.30,
+      "model_path": "models/action_gate_v1/model.joblib",
+      "window_frames": 30,
+      "step": 2
+    },
+    "box_gate": {
+      "enabled": false,
+      "depth_ratio_min": 0.25,
+      "center_dist_max": 99.0
+    }
+  },
+  "box_trigger": {
+    "enabled": true,
+    "require_pick_state": false,
+    "wrist_score_min": 0.15
+  },
+  "alarm": {
+    "min_consecutive_frames": 1,
+    "cooldown_frames": 0
+  }
+}

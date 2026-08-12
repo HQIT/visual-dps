@@ -1,0 +1,12 @@
+{
+  "name": "action_gate_v1",
+  "model_path": "output/train/action_gate_v1/model.joblib",
+  "window_frames": 30,
+  "step": 2,
+  "oof_auc": 0.875652524978755,
+  "n_samples": 23226,
+  "n_positive": 13653,
+  "manifest": "/home/hqit/workspace/visual-dps-pick-state/output/manifests/tagged_aug85_v2.json",
+  "scores": "/home/hqit/workspace/visual-dps-pick-state/output/scores/v5",
+  "default_threshold": 0.3
+}

@@ -1,0 +1,31 @@
+{
+  "name": "v5",
+  "description": "按「一次拣货」重切段后重训（tagged_aug85_v2）；手腕门槛0.15",
+  "pose_frame_interval": 2,
+  "pick_state": {
+    "scorer": "rule_expert"
+  },
+  "pair_state": {
+    "enabled": true,
+    "scorer": "linear_expert",
+    "threshold": 0.24,
+    "score_smooth": {
+      "enabled": true,
+      "window_frames": 5,
+      "method": "ema",
+      "ema_alpha": 0.4
+    },
+    "linear_expert": {
+      "model_path": "models/v5_base/model.json"
+    }
+  },
+  "box_trigger": {
+    "enabled": true,
+    "require_pick_state": false,
+    "wrist_score_min": 0.15
+  },
+  "alarm": {
+    "min_consecutive_frames": 2,
+    "cooldown_frames": 0
+  }
+}

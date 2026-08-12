@@ -28,3 +28,9 @@ scripts/.local/
 # 本机/WSL 中继实验脚本，不入库
 scripts/relay-to-remote-mediamtx.sh
 node_modules/
+
+# xugang local deploy assets (not pushed)
+deploy-bundle/docker-images/
+deploy-bundle/weights/
+.env.xugang.local
+*.tar

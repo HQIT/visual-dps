@@ -1,0 +1,16 @@
+visual-dps offline package (split tar)
+package_layout: split-tar-v1
+created: 2026-07-27T19:03:18+08:00
+git: 59495b1 (test-from-4841de6a)
+image_tag: 20260727-test-from-4841de6a-85288b7
+host_project_root: /home/hqit/workspace/visual-dps-0727-deploy/app
+
+images (split tar, self-built + bases):
+  redis:7 + bluenviron/mediamtx:1.11.3 -> docker-images/bases-redis-mediamtx.tar
+  visual-dps-visual-dps-ui:20260727-test-from-4841de6a-85288b7
+  visual-dps-event-worker:20260727-test-from-4841de6a-85288b7
+  visual-dps-inference-lite-gpu:20260727-test-from-4841de6a-85288b7
+  visual-dps-inference-lite-gpu-onnx:20260727-test-from-4841de6a-85288b7
+
+install:
+  ./verify-package.sh && ./install.sh --host <IP> --stop-infer

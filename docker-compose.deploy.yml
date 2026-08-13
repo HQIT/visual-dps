@@ -67,7 +67,6 @@ services:
       - INFERENCE_CONTAINER_PREFIX=${INFERENCE_CONTAINER_PREFIX:-visual-dps-infer-}
       - INFERENCE_USE_GPU=${INFERENCE_USE_GPU:-0}
       - INFERENCE_BACKEND=${INFERENCE_BACKEND:-rtmpose_t}
-      - INFERENCE_CONTAINER_PREFIX=${INFERENCE_CONTAINER_PREFIX:-visual-dps-infer-}
       - VISUAL_DPS_VERSION_FILE=/app/version.json
       - VISUAL_DPS_IMAGE_TAG=${VISUAL_DPS_IMAGE_TAG:-latest}
       - VISUAL_DPS_UI_IMAGE=visual-dps-visual-dps-ui:${VISUAL_DPS_IMAGE_TAG:-latest}

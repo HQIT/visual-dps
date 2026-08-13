@@ -81,6 +81,7 @@ for rel in \
   services/hwaccel_probe.py \
   services/nvidia_pip_cuda.py \
   services/rtsp_capture.py \
+  services/wall_clock.py \
   services/pipeline_log.py \
   services/pose_bus.py \
   services/runtime_config_service.py \
@@ -112,11 +113,12 @@ cp "${ROOT}/scripts/deploy-only/install.sh" "${PKG}/install.sh"
 cp "${ROOT}/scripts/deploy-only/verify-package.sh" "${PKG}/verify-package.sh"
 cp "${ROOT}/scripts/deploy-only/verify-images.sh" "${PKG}/verify-images.sh"
 cp "${ROOT}/scripts/deploy-only/infer-bind-mounts.sh" "${PKG}/scripts/infer-bind-mounts.sh"
+cp "${ROOT}/scripts/deploy-only/retag-infer-images.sh" "${PKG}/scripts/retag-infer-images.sh"
 cp "${ROOT}/scripts/lib/install-deploy-stack.sh" "${PKG}/scripts/lib/install-deploy-stack.sh"
 cp "${ROOT}/scripts/lib/verify-deploy-images.sh" "${PKG}/scripts/lib/verify-deploy-images.sh"
 cp "${ROOT}/scripts/deploy-only/pack-deploy.sh" "${PKG}/pack-deploy.sh"
 cp "${ROOT}/scripts/deploy-only/DEPLOY-0629.md" "${PKG}/DEPLOY-0629.md"
-chmod +x "${PKG}/install.sh" "${PKG}/verify-package.sh" "${PKG}/verify-images.sh" "${PKG}/pack-deploy.sh"
+chmod +x "${PKG}/install.sh" "${PKG}/verify-package.sh" "${PKG}/verify-images.sh" "${PKG}/pack-deploy.sh" "${PKG}/scripts/retag-infer-images.sh"
 
 GIT_HEAD="nogit"
 git -C "${ROOT}" rev-parse HEAD >/dev/null 2>&1 && GIT_HEAD="$(git -C "${ROOT}" rev-parse HEAD)"

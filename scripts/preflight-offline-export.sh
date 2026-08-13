@@ -8,13 +8,15 @@ cd "${ROOT}"
 
 INFERENCE_MODE="all"
 REQUIRE_MODELS=1
+SKIP_WORKER2=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --inference) INFERENCE_MODE="$2"; shift 2 ;;
     --no-models) REQUIRE_MODELS=0; shift ;;
+    --skip-worker-2) SKIP_WORKER2=1; shift ;;
     -h|--help)
-      echo "用法: $0 --inference MODE [--no-models]"
+      echo "用法: $0 --inference MODE [--no-models] [--skip-worker-2]"
       exit 0
       ;;
     *) echo "未知参数: $1" >&2; exit 1 ;;
@@ -93,6 +95,13 @@ require_image "redis:7"
 require_image "bluenviron/mediamtx:1.11.3"
 require_image "${UI}"
 require_image "${EV}"
+if [[ "${SKIP_WORKER2}" -eq 0 ]]; then
+  EV2="$(resolve_repo_tag "visual-dps-event-worker-2" "visual-dps-event-worker-2:${VISUAL_DPS_IMAGE_TAG:-}")"
+  [[ -n "${EV2}" ]] || { echo "FAIL: 缺少 event-worker-2 镜像（./scripts/build-event-worker-2-image.sh 或 --skip-worker-2）" >&2; exit 1; }
+  require_image "${EV2}"
+else
+  echo "SKIP: visual-dps-event-worker-2 (--skip-worker-2)"
+fi
 warn_latest_only "${UI}"
 
 ONNX_IMAGE=""

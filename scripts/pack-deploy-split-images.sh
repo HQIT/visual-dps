@@ -41,6 +41,7 @@ IMAGES=(
   "redis:7|bluenviron/mediamtx:1.11.3"
   "visual-dps-visual-dps-ui:${TAG}"
   "visual-dps-event-worker:${TAG}"
+  "visual-dps-event-worker-2:${TAG}"
   "visual-dps-inference-lite-gpu:${TAG}"
   "visual-dps-inference-lite-gpu-onnx:${TAG}"
 )
@@ -97,9 +98,12 @@ else
 fi
 
 echo "==> 3/3 安装分拆包脚本"
-mkdir -p "${OUT}/scripts"
+mkdir -p "${OUT}/scripts/lib"
 cp "${ROOT}/scripts/deploy-only/load-split-images.sh" "${OUT}/scripts/load-split-images.sh"
 cp "${ROOT}/scripts/deploy-only/infer-bind-mounts.sh" "${OUT}/scripts/infer-bind-mounts.sh"
+cp "${ROOT}/scripts/lib/install-deploy-stack.sh" "${OUT}/scripts/lib/install-deploy-stack.sh"
+cp "${ROOT}/scripts/lib/verify-deploy-images.sh" "${OUT}/scripts/lib/verify-deploy-images.sh"
+cp "${ROOT}/scripts/deploy-only/verify-images.sh" "${OUT}/verify-images.sh"
 cp "${ROOT}/scripts/deploy-only/install-with-images.sh" "${OUT}/install.sh"
 cp "${ROOT}/scripts/deploy-only/verify-package-split.sh" "${OUT}/verify-package.sh"
 chmod +x "${OUT}/install.sh" "${OUT}/verify-package.sh" "${OUT}/scripts/load-split-images.sh"
@@ -158,6 +162,7 @@ EOF
   echo "  redis:7 + bluenviron/mediamtx:1.11.3 -> docker-images/bases-redis-mediamtx.tar"
   echo "  visual-dps-visual-dps-ui:${TAG}"
   echo "  visual-dps-event-worker:${TAG}"
+  echo "  visual-dps-event-worker-2:${TAG}"
   echo "  visual-dps-inference-lite-gpu:${TAG}"
   echo "  visual-dps-inference-lite-gpu-onnx:${TAG}"
   echo ""

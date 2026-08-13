@@ -22,6 +22,7 @@ class PickStateRedisWorker(EventRedisWorker):
         )
 
     def _get_processor(self, camera_id: str, infer_w: int, infer_h: int):
+        self._refresh_runtime_settings_if_needed()
         json_path = self._resolve_json_path(camera_id)
         ctx = self._contexts.get(camera_id)
         mtime = os.path.getmtime(json_path) if os.path.isfile(json_path) else 0.0
@@ -56,6 +57,7 @@ class PickStateRedisWorker(EventRedisWorker):
                 json_path=json_path,
                 json_mtime=mtime,
                 processor=processor,  # type: ignore[arg-type]
+                prefilter=None,  # pick_state 自带门控，不用硬规则 prefilter
                 infer_w=infer_w,
                 infer_h=infer_h,
             )

@@ -160,16 +160,17 @@ class PickStatePipeline:
 
         temporal_feats = self._pair_temporal.update(ctx.frame_idx, active_pairs)
 
-        # 动作门控：先更新每人骨架历史，再按人缓存是否放行
+        # 动作门控 A：无进框时只维护 warm track；有进框时本帧所有人仍写入（与改前进框帧一致）
+        # GBDT 仅在 smooth >= 阈值后计算
         action_ok: dict[str, tuple[bool, float]] = {}
+        hit_track_ids = {key.split("|", 1)[0] for _, key, _, _ in pending}
         if self.action_gate.enabled and self._action_tracker is not None:
-            self._action_tracker.update(ctx.frame_idx, feature_rows)
-            for row, key, _hit, _pair in pending:
-                track_id = key.split("|", 1)[0]
-                if track_id in action_ok:
-                    continue
-                feat = self._action_tracker.features(ctx.frame_idx, track_id)
-                action_ok[track_id] = self.action_gate.allow(feat)
+            if hit_track_ids:
+                self._action_tracker.update(ctx.frame_idx, feature_rows, track_ids=None)
+            else:
+                warm = self._action_tracker._warm_tracks(ctx.frame_idx)
+                if warm:
+                    self._action_tracker.update(ctx.frame_idx, feature_rows, track_ids=warm)
 
         for row, key, hit, pair in pending:
             pair_row = dict(row)
@@ -181,8 +182,11 @@ class PickStatePipeline:
             is_picking = smooth_v >= self.pair_threshold
             track_id = key.split("|", 1)[0]
             gate_detail: dict[str, Any] = {}
-            if is_picking and self.action_gate.enabled:
-                ok, act_p = action_ok.get(track_id, (True, 1.0))
+            if is_picking and self.action_gate.enabled and self._action_tracker is not None:
+                if track_id not in action_ok:
+                    feat = self._action_tracker.features(ctx.frame_idx, track_id)
+                    action_ok[track_id] = self.action_gate.allow(feat)
+                ok, act_p = action_ok[track_id]
                 gate_detail["action_score"] = act_p
                 if not ok:
                     is_picking = False

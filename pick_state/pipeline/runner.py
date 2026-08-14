@@ -194,11 +194,12 @@ class PickStatePipeline:
             track_id = key.split("|", 1)[0]
             gate_detail: dict[str, Any] = {}
             if is_picking and self.action_gate.enabled and self._action_tracker is not None:
-                with t.span("action_gate_ms"):
-                    if track_id not in action_ok:
+                if track_id not in action_ok:
+                    with t.span("action_feat_ms"):
                         feat = self._action_tracker.features(ctx.frame_idx, track_id)
+                    with t.span("action_predict_ms"):
                         action_ok[track_id] = self.action_gate.allow(feat)
-                        t.timings.n_action_gate_calls += 1
+                    t.timings.n_action_gate_calls += 1
                 ok, act_p = action_ok[track_id]
                 gate_detail["action_score"] = act_p
                 if not ok:

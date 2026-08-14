@@ -28,6 +28,8 @@ STAGES = [
     "pair_temporal_ms",
     "action_track_ms",
     "pair_score_ms",
+    "action_feat_ms",
+    "action_predict_ms",
     "action_gate_ms",
     "box_gate_ms",
     "alarm_ms",
@@ -131,7 +133,14 @@ def main() -> int:
             if is_hot:
                 hot_frames += 1
                 nh += 1
-                for key in ("pick_total_ms", "action_gate_ms", "box_ms", "feature_ms"):
+                for key in (
+                    "pick_total_ms",
+                    "action_feat_ms",
+                    "action_predict_ms",
+                    "action_gate_ms",
+                    "box_ms",
+                    "feature_ms",
+                ):
                     cam_hot[key].append(float(st.get(key) or 0.0))
             for key in STAGES:
                 val = st.get(key)

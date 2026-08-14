@@ -28,6 +28,8 @@ STAGES = [
     "pair_temporal_ms",
     "action_track_ms",
     "pair_score_ms",
+    "action_feat_ms",
+    "action_predict_ms",
     "action_gate_ms",
     "box_gate_ms",
     "alarm_ms",
@@ -153,6 +155,14 @@ def main() -> int:
             if key in ("pick_total_ms", "worker_ms") or not hot_s.get(key):
                 continue
             print(f"  {key:18s} {statistics.mean(hot_s[key]) / hot_mean * 100:5.1f}%")
+        af = hot_s.get("action_feat_ms")
+        ap = hot_s.get("action_predict_ms")
+        if af and ap:
+            ag = statistics.mean(af) + statistics.mean(ap)
+            if ag > 0:
+                print("\n== action_gate 二级拆分（HOT mean，占 action_gate） ==")
+                print(f"  action_feat_ms     {statistics.mean(af) / ag * 100:5.1f}%  mean={statistics.mean(af):.2f}ms")
+                print(f"  action_predict_ms  {statistics.mean(ap) / ag * 100:5.1f}%  mean={statistics.mean(ap):.2f}ms")
     return 0 if frames else 1
 
 

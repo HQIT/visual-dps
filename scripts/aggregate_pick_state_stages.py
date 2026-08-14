@@ -16,6 +16,8 @@ STAGE_KEYS = (
     "pair_temporal_ms",
     "action_track_ms",
     "pair_score_ms",
+    "action_feat_ms",
+    "action_predict_ms",
     "action_gate_ms",
     "box_gate_ms",
     "alarm_ms",

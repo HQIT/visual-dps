@@ -24,7 +24,8 @@ class StageTimings:
     pair_temporal_ms: float = 0.0
     action_track_ms: float = 0.0
     pair_score_ms: float = 0.0
-    action_gate_ms: float = 0.0
+    action_feat_ms: float = 0.0
+    action_predict_ms: float = 0.0
     box_gate_ms: float = 0.0
     alarm_ms: float = 0.0
     n_persons: int = 0
@@ -40,7 +41,8 @@ class StageTimings:
             + self.pair_temporal_ms
             + self.action_track_ms
             + self.pair_score_ms
-            + self.action_gate_ms
+            + self.action_feat_ms
+            + self.action_predict_ms
             + self.box_gate_ms
             + self.alarm_ms
         )
@@ -53,7 +55,9 @@ class StageTimings:
             "pair_temporal_ms": round(self.pair_temporal_ms, 2),
             "action_track_ms": round(self.action_track_ms, 2),
             "pair_score_ms": round(self.pair_score_ms, 2),
-            "action_gate_ms": round(self.action_gate_ms, 2),
+            "action_feat_ms": round(self.action_feat_ms, 2),
+            "action_predict_ms": round(self.action_predict_ms, 2),
+            "action_gate_ms": round(self.action_feat_ms + self.action_predict_ms, 2),
             "box_gate_ms": round(self.box_gate_ms, 2),
             "alarm_ms": round(self.alarm_ms, 2),
             "pick_total_ms": round(self.total_ms(), 2),

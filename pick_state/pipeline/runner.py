@@ -16,6 +16,7 @@ from pick_state.features.pair_temporal import PairTemporalTracker
 from pick_state.pipeline.alarm import AlarmTracker
 from pick_state.pipeline.box_trigger import BoxTrigger
 from pick_state.pipeline.smooth import ScalarSmoother, SmoothConfig
+from pick_state.pipeline.timing import StageTimer, stage_profiling_enabled
 from pick_state.pipeline.types import FrameContext, PickDecision, PipelineResult
 
 
@@ -126,11 +127,14 @@ class PickStatePipeline:
         feature_rows: list[dict[str, Any]],
         box_trigger: BoxTrigger,
         infer_height: int,
+        timer: StageTimer | None = None,
     ) -> PipelineResult:
         """逐个 (人, 货框) 对打分：手腕落在哪个框里，就只对那个框负责。"""
         decisions: list[PickDecision] = []
         tokens: set[str] = set()
         hit_detail: list[dict[str, Any]] = []
+        t = timer or StageTimer(enabled=False)
+        t.timings.n_persons = len(feature_rows)
 
         if self._pair_temporal is None:
             self.configure_dims(
@@ -140,65 +144,77 @@ class PickStatePipeline:
         # 先枚举全帧的命中，才能让时序 tracker 知道哪些对本帧消失了
         pending: list[tuple[dict[str, Any], str, dict[str, Any], dict[str, Any]]] = []
         active_pairs: dict[str, dict[str, Any]] = {}
-        for row in feature_rows:
-            person = row.get("_person")
-            if not isinstance(person, dict):
-                continue
-            track_id = str(row.get("person_track_id") or "0")
-            for hit in box_trigger.hits_for_person(person):
-                box = hit.get("box")
-                if box is None:
+        with t.span("box_ms"):
+            for row in feature_rows:
+                person = row.get("_person")
+                if not isinstance(person, dict):
                     continue
-                pair = compute_pair_features(person, hit, box, infer_height=infer_height)
-                key = f"{track_id}|{hit['token']}"
-                active_pairs[key] = {
-                    "depth_ratio": hit["depth_ratio"],
-                    "center_dist_norm": pair.get("center_dist_norm"),
-                    "wrist_xy": hit["wrist_xy"],
-                }
-                pending.append((row, key, hit, pair))
+                track_id = str(row.get("person_track_id") or "0")
+                for hit in box_trigger.hits_for_person(person):
+                    box = hit.get("box")
+                    if box is None:
+                        continue
+                    pair = compute_pair_features(person, hit, box, infer_height=infer_height)
+                    key = f"{track_id}|{hit['token']}"
+                    active_pairs[key] = {
+                        "depth_ratio": hit["depth_ratio"],
+                        "center_dist_norm": pair.get("center_dist_norm"),
+                        "wrist_xy": hit["wrist_xy"],
+                    }
+                    pending.append((row, key, hit, pair))
+        t.timings.n_hits = len(pending)
 
-        temporal_feats = self._pair_temporal.update(ctx.frame_idx, active_pairs)
+        with t.span("pair_temporal_ms"):
+            temporal_feats = self._pair_temporal.update(ctx.frame_idx, active_pairs)
 
         # 动作门控 A：无进框时只维护 warm track；有进框时本帧所有人仍写入（与改前进框帧一致）
         # GBDT 仅在 smooth >= 阈值后计算
         action_ok: dict[str, tuple[bool, float]] = {}
         hit_track_ids = {key.split("|", 1)[0] for _, key, _, _ in pending}
         if self.action_gate.enabled and self._action_tracker is not None:
-            if hit_track_ids:
-                self._action_tracker.update(ctx.frame_idx, feature_rows, track_ids=None)
-            else:
-                warm = self._action_tracker._warm_tracks(ctx.frame_idx)
-                if warm:
-                    self._action_tracker.update(ctx.frame_idx, feature_rows, track_ids=warm)
+            with t.span("action_track_ms"):
+                if hit_track_ids:
+                    self._action_tracker.update(ctx.frame_idx, feature_rows, track_ids=None)
+                else:
+                    warm = self._action_tracker._warm_tracks(ctx.frame_idx)
+                    if warm:
+                        self._action_tracker.update(
+                            ctx.frame_idx, feature_rows, track_ids=warm
+                        )
 
         for row, key, hit, pair in pending:
             pair_row = dict(row)
             pair_row.update(pair)
             pair_row.update(temporal_feats.get(key) or {})
-            raw, detail = self.pair_scorer.score(pair_row)
-            smooth = self._pair_smoother(key).update(raw)
-            smooth_v = float(smooth if smooth is not None else raw)
+            with t.span("pair_score_ms"):
+                raw, detail = self.pair_scorer.score(pair_row)
+                smooth = self._pair_smoother(key).update(raw)
+                smooth_v = float(smooth if smooth is not None else raw)
             is_picking = smooth_v >= self.pair_threshold
             track_id = key.split("|", 1)[0]
             gate_detail: dict[str, Any] = {}
             if is_picking and self.action_gate.enabled and self._action_tracker is not None:
-                if track_id not in action_ok:
-                    feat = self._action_tracker.features(ctx.frame_idx, track_id)
-                    action_ok[track_id] = self.action_gate.allow(feat)
+                with t.span("action_gate_ms"):
+                    if track_id not in action_ok:
+                        feat = self._action_tracker.features(ctx.frame_idx, track_id)
+                        action_ok[track_id] = self.action_gate.allow(feat)
+                        t.timings.n_action_gate_calls += 1
                 ok, act_p = action_ok[track_id]
                 gate_detail["action_score"] = act_p
                 if not ok:
                     is_picking = False
                     gate_detail["blocked_by"] = "action_gate"
             if is_picking and self.box_gate_enabled:
-                depth = float(hit.get("depth_ratio") or pair.get("depth_ratio") or 0.0)
-                center = float(pair.get("center_dist_norm") or 99.0)
-                gate_detail["depth_ratio"] = depth
-                gate_detail["center_dist_norm"] = center
-                if depth < self.box_depth_min or center > self.box_center_max:
-                    is_picking = False
-                    gate_detail["blocked_by"] = "box_gate"
+                with t.span("box_gate_ms"):
+                    depth = float(hit.get("depth_ratio") or pair.get("depth_ratio") or 0.0)
+                    center = float(pair.get("center_dist_norm") or 99.0)
+                    gate_detail["depth_ratio"] = depth
+                    gate_detail["center_dist_norm"] = center
+                    if depth < self.box_depth_min or center > self.box_center_max:
+                        is_picking = False
+                        gate_detail["blocked_by"] = "box_gate"
+            if is_picking:
+                t.timings.n_picking += 1
             if gate_detail:
                 detail = dict(detail or {})
                 detail["gates"] = gate_detail
@@ -217,12 +233,14 @@ class PickStatePipeline:
                 hit_detail.append(hit)
 
         collisions = sorted(tokens)
+        with t.span("alarm_ms"):
+            alarm_hits = self.alarm.step(collisions, ctx.frame_idx)
         return PipelineResult(
             frame_idx=ctx.frame_idx,
             pick_decisions=decisions,
             box_hits=collisions,
-            alarm_hits=self.alarm.step(collisions, ctx.frame_idx),
-            debug={"hits": hit_detail},
+            alarm_hits=alarm_hits,
+            debug={"hits": hit_detail, "timings": t.timings},
         )
 
     def process_frame(
@@ -233,11 +251,12 @@ class PickStatePipeline:
         box_trigger: BoxTrigger | None = None,
         provisional_box_hits: list[str] | None = None,
         infer_height: int = 1,
+        timer: StageTimer | None = None,
     ) -> PipelineResult:
         """按人判定拣货态；非拣货态的人不贡献碰撞（对齐 DPS blocked → continue）。"""
         if self.pair_enabled and box_trigger is not None:
             return self._process_frame_pairwise(
-                ctx, feature_rows or [], box_trigger, infer_height
+                ctx, feature_rows or [], box_trigger, infer_height, timer=timer
             )
 
         decisions: list[PickDecision] = []

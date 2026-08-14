@@ -24,6 +24,7 @@ from services.event_engine.event_log import (
     prefilter_log_enabled,
 )
 from services.event_engine.sharding import owns_camera, shard_config, shard_label
+from pick_state.pipeline.timing import stage_profiling_enabled
 from services.pipeline_log import (
     get_collision_logger,
     get_prefilter_logger,
@@ -46,6 +47,19 @@ from services.runtime_config_service import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _worker_done_should_sample(stage_timings: dict | None) -> bool:
+    """分阶段 profiling 时：热路径帧必打；其余仍按 PIPELINE_LOG sample。"""
+    if not stage_profiling_enabled() or not stage_timings:
+        return True
+    if int(stage_timings.get("n_hits") or 0) > 0:
+        return False
+    if int(stage_timings.get("n_picking") or 0) > 0:
+        return False
+    if int(stage_timings.get("n_action_gate") or 0) > 0:
+        return False
+    return True
 
 
 class _CameraContext:
@@ -449,6 +463,8 @@ class EventRedisWorker:
             worker_ms=worker_ms,
             hits=len(collisions),
             alarms=len(alarm_collisions),
+            sample=_worker_done_should_sample(result.get("stage_timings")),
+            **(result.get("stage_timings") or {}),
         )
 
         self._log_event_frame(pose, collisions, alarm_collisions, prefilter_logs)

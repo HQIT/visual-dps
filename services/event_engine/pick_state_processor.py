@@ -12,6 +12,7 @@ from pick_state.boxes import BoxDef, polygon_center_and_inradius
 from pick_state.features.bank import FeatureBank
 from pick_state.pipeline.box_trigger import BoxTrigger
 from pick_state.pipeline.runner import PickStatePipeline, load_pipeline_config
+from pick_state.pipeline.timing import StageTimer, stage_profiling_enabled
 from pick_state.pipeline.types import FrameContext
 from services.box_identity import box_collision_token
 from services.event_engine.collision import PersonTrackAssigner
@@ -154,8 +155,12 @@ class PickStateProcessor:
     def process(self, pose_frame: dict, prefilter: Any = None) -> dict:
         del prefilter  # pick_state 自带门控，忽略硬规则 prefilter
         frame_idx = int(pose_frame.get("frame_idx") or 0)
-        persons = self._ensure_track_ids(pose_frame)
+        timer = StageTimer(enabled=stage_profiling_enabled())
+
+        with timer.span("track_ms"):
+            persons = self._ensure_track_ids(pose_frame)
         frame = {"frame_idx": frame_idx, "persons": persons}
+        timer.timings.n_persons = len(persons)
 
         if not hasattr(self, "bank"):
             iw = int(pose_frame.get("infer_width") or self.infer_width or 0)
@@ -164,15 +169,19 @@ class PickStateProcessor:
                 self.infer_width, self.infer_height = iw, ih
                 self._configure()
             else:
-                return {
+                out = {
                     "collisions": [],
                     "alarm_collisions": [],
                     "skeletons": persons,
                     "frame_idx": frame_idx,
                     "prefilter_logs": [],
                 }
+                if timer.enabled:
+                    out["stage_timings"] = timer.timings.as_log_fields()
+                return out
 
-        rows = self.bank.rows_for_frame(frame)
+        with timer.span("feature_ms"):
+            rows = self.bank.rows_for_frame(frame)
         by_tid = {str(p.get("person_track_id")): p for p in persons}
         for r in rows:
             if "_person" not in r:
@@ -186,11 +195,17 @@ class PickStateProcessor:
             feature_rows=rows,
             box_trigger=self.trigger,
             infer_height=self.infer_height,
+            timer=timer,
         )
-        return {
+        stage_timings = timer.timings.as_log_fields() if timer.enabled else None
+
+        out = {
             "collisions": list(result.box_hits or []),
             "alarm_collisions": list(result.alarm_hits or []),
             "skeletons": persons,
             "frame_idx": frame_idx,
             "prefilter_logs": [],
         }
+        if stage_timings is not None:
+            out["stage_timings"] = stage_timings
+        return out

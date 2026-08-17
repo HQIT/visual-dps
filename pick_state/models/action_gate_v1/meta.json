@@ -1,12 +1,18 @@
 {
   "name": "action_gate_v1",
-  "model_path": "output/train/action_gate_v1/model.joblib",
+  "model_path": "models/action_gate_v1/model.joblib",
+  "onnx_path": "models/action_gate_v1/model.onnx",
+  "backend_default": "onnx",
   "window_frames": 30,
   "step": 2,
+  "n_features": 68,
   "oof_auc": 0.875652524978755,
   "n_samples": 23226,
   "n_positive": 13653,
-  "manifest": "/home/hqit/workspace/visual-dps-pick-state/output/manifests/tagged_aug85_v2.json",
-  "scores": "/home/hqit/workspace/visual-dps-pick-state/output/scores/v5",
-  "default_threshold": 0.3
+  "default_threshold": 0.3,
+  "onnx_parity": {
+    "max_abs_diff": 1.6146058662291907e-07,
+    "bench_speedup_x": 222.0,
+    "source": "visual-dps-pick-state/output/train/action_gate_v1/model.onnx"
+  }
 }

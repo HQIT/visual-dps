@@ -1,0 +1,19 @@
+{
+  "joblib_path": "output/train/action_gate_v1/model.joblib",
+  "onnx_path": "output/train/action_gate_v1/model.onnx",
+  "n_features": 68,
+  "onnx_bytes": 909637,
+  "convert_ms": 297.3,
+  "parity": {
+    "n_samples": 500,
+    "max_abs_diff": 1.6146058662291907e-07,
+    "mean_abs_diff": 3.473081317157821e-08
+  },
+  "bench_ms_per_call": {
+    "sklearn_1x": 7.7591,
+    "onnxruntime_1x": 0.0349,
+    "speedup_x": 222.0
+  },
+  "zipmap": false,
+  "skl2onnx_patch": "histgbdt_missing_bool_to_int"
+}

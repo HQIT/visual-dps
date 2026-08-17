@@ -20,8 +20,10 @@
     },
     "action_gate": {
       "enabled": true,
+      "backend": "onnx",
       "threshold": 0.30,
       "model_path": "models/action_gate_v1/model.joblib",
+      "onnx_path": "models/action_gate_v1/model.onnx",
       "window_frames": 30,
       "step": 2
     },

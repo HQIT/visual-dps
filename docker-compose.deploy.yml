@@ -59,7 +59,7 @@ services:
       - MEDIAMTX_HLS_BASE=http://mediamtx:${MEDIAMTX_HLS_PORT:-8888}
       - MEDIAMTX_WEBRTC_BASE=http://mediamtx:${MEDIAMTX_WEBRTC_PORT:-8889}
       - RTSP_CAPTURE_BACKEND=opencv
-      - HOST_PROJECT_ROOT=${PWD}
+      - HOST_PROJECT_ROOT=${HOST_PROJECT_ROOT:-${PWD}}
       - INFERENCE_IMAGE=${INFERENCE_IMAGE:-}
       - INFERENCE_LITE_IMAGE=${INFERENCE_LITE_IMAGE:-visual-dps-inference-lite:${VISUAL_DPS_IMAGE_TAG:-latest}}
       - INFERENCE_LITE_GPU_IMAGE=${INFERENCE_LITE_GPU_IMAGE:-visual-dps-inference-lite-gpu:${VISUAL_DPS_IMAGE_TAG:-latest}}
@@ -77,6 +77,13 @@ services:
       - POSE_DELIVERY=stream
       - POSE_STREAM_KEY=pose:stream
       - POSE_STREAM_GROUP=event-workers
+      - OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
+      - MKL_NUM_THREADS=${MKL_NUM_THREADS:-1}
+      - OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-1}
+      - NUMEXPR_NUM_THREADS=${NUMEXPR_NUM_THREADS:-1}
+      - OPENCV_NUM_THREADS=${OPENCV_NUM_THREADS:-1}
+      - INFERENCE_ORT_INTRA_OP_THREADS=${INFERENCE_ORT_INTRA_OP_THREADS:-1}
+      - INFERENCE_ORT_INTER_OP_THREADS=${INFERENCE_ORT_INTER_OP_THREADS:-1}
       - TZ=${TZ:-Asia/Shanghai}
     volumes:
       - ./app_config.json:/app/app_config.json:ro
@@ -133,6 +140,8 @@ services:
       - PICK_STATE_CONFIG=pick_state/configs/pipeline.v5_gated.json
       - EVENT_WORKER_ENABLE_CALLBACKS=${EVENT_WORKER_ENABLE_CALLBACKS:-1}
       - COLLISION_LOG=${COLLISION_LOG:-0}
+      - ACTION_GATE_ORT_INTRA_OP_THREADS=${ACTION_GATE_ORT_INTRA_OP_THREADS:-1}
+      - ACTION_GATE_ORT_INTER_OP_THREADS=${ACTION_GATE_ORT_INTER_OP_THREADS:-1}
       - TZ=${TZ:-Asia/Shanghai}
     volumes:
       - ./app_config.json:/app/app_config.json:ro

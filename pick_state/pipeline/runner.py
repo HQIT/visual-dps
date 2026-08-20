@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from pick_state.experts.action_gate import ActionGate
+from pick_state.experts.action_gate import get_shared_action_gate
 from pick_state.experts.linear_expert import LinearPickExpert
 from pick_state.experts.rule_expert import RulePickExpert
 from pick_state.features.action_temporal import ActionSequenceTracker
@@ -65,7 +65,7 @@ class PickStatePipeline:
         self._pair_temporal: PairTemporalTracker | None = None
 
         # 动作门控（A）与邻框几何门控（B）：默认关闭，由配置开关
-        self.action_gate = ActionGate(pair_cfg.get("action_gate") or {})
+        self.action_gate = get_shared_action_gate(pair_cfg.get("action_gate") or {})
         box_gate = pair_cfg.get("box_gate") or {}
         self.box_gate_enabled = bool(box_gate.get("enabled"))
         self.box_depth_min = float(box_gate.get("depth_ratio_min", 0.0))

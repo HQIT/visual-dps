@@ -11,6 +11,29 @@ from core.config import load_app_config
 from services.callback_reporter import CollisionCallbackReporter
 from services.event_engine.pick_state_worker import PickStateRedisWorker
 from services.event_engine.sharding import shard_label
+from pick_state.experts.action_gate import (
+    format_action_gate_probe_line,
+    probe_action_gate_from_pipeline,
+)
+
+
+def _log_action_gate_probe() -> None:
+    cfg = os.environ.get(
+        "PICK_STATE_CONFIG", "pick_state/configs/pipeline.v5_gated.json"
+    ).strip()
+    try:
+        info = probe_action_gate_from_pipeline(cfg)
+        line = format_action_gate_probe_line(info)
+        if info.get("enabled") and info.get("backend") == "onnx" and info.get("probe_ok"):
+            print(f"ℹ️ {line}")
+        elif info.get("enabled") and info.get("backend") != "onnx":
+            print(f"⚠️ {line}（期望 backend=onnx）")
+        elif info.get("enabled") and not info.get("probe_ok"):
+            print(f"❌ {line}")
+        else:
+            print(f"ℹ️ {line}")
+    except Exception as exc:
+        print(f"⚠️ action_gate 探针失败 config={cfg}: {exc}")
 
 
 async def _run():
@@ -26,6 +49,8 @@ async def _run():
     if enable_cb:
         reporter = CollisionCallbackReporter(app_config.get("reporting", {}))
         await reporter.start()
+
+    _log_action_gate_probe()
 
     worker = PickStateRedisWorker(app_config, callback_reporter=reporter)
     await worker.start()

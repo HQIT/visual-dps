@@ -5,6 +5,7 @@ import os
 import time
 
 from core.config import load_app_config
+from core.ort_runtime import infer_thread_env_for_container
 from services.camera_service import normalize_rtsp_url
 from services.inference_backends import resolve_backend_name
 from services.inference_backends.model_registry import (
@@ -356,6 +357,7 @@ def start_inference_container(camera: dict, request=None) -> dict:
     # 须在宿主机挂载（UI 在容器内时 isfile(HOST_PROJECT_ROOT/...) 恒为 False）
     if HOST_PROJECT_ROOT:
         binds.append(_host_bind("core/config.py", read_only=True))
+        binds.append(_host_bind("core/ort_runtime.py", read_only=True))
         for rel in (
             "inference_worker.py",
             "services/inference_service.py",
@@ -403,6 +405,7 @@ def start_inference_container(camera: dict, request=None) -> dict:
         "POSE_STREAM_GROUP": os.environ.get("POSE_STREAM_GROUP", "event-workers"),
         "POSE_STREAM_MAXLEN": os.environ.get("POSE_STREAM_MAXLEN", "2000"),
     }
+    env.update(infer_thread_env_for_container())
     tz = os.environ.get("TZ", "Asia/Shanghai").strip() or "Asia/Shanghai"
     env["TZ"] = tz
     if preset.family == BACKEND_RTMPOSE_ONNX:

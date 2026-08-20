@@ -7,6 +7,11 @@ import os
 
 import numpy as np
 
+from core.ort_runtime import (
+    build_ort_session_options,
+    ort_session_summary,
+    rebind_rtmlib_ort_session,
+)
 from services.inference_backends.base import PoseBatch
 from services.inference_backends.model_registry import (
     DEFAULT_DET_VARIANT,
@@ -53,18 +58,26 @@ def _preload_ort_cuda_dlls(device: str) -> None:
         get_inference_logger().warning(f"⚠️ onnxruntime CUDA 库预加载失败: {exc}")
 
 
-def _ort_active_provider(onnx_path: str) -> str:
+def _ort_active_provider(onnx_path: str, sess_options) -> str:
     import onnxruntime as ort
 
     sess = ort.InferenceSession(
         onnx_path,
+        sess_options=sess_options,
         providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
     )
-    return sess.get_providers()[0]
+    try:
+        return sess.get_providers()[0]
+    finally:
+        del sess
 
 
 def _resolve_model_path(app_config: dict, subdir: str) -> str:
     return os.path.join(_models_dir(app_config), subdir, "end2end.onnx")
+
+
+def _apply_rtmlib_ort_options(tool, sess_options) -> None:
+    rebind_rtmlib_ort_session(tool, sess_options)
 
 
 class RTMPoseOnnxBackend:
@@ -107,8 +120,10 @@ class RTMPoseOnnxBackend:
         pose_input_size = (int(pose_size[0]), int(pose_size[1]))
 
         infer_log = get_inference_logger()
+        sess_options = build_ort_session_options()
         infer_log.info(
-            f"🚀 正在加载 RTMDet-{self._det_variant.upper()} + RTMPose-{self._variant.upper()}（ONNX）…"
+            f"🚀 正在加载 RTMDet-{self._det_variant.upper()} + RTMPose-{self._variant.upper()}（ONNX）… "
+            f"ORT {ort_session_summary(sess_options)}"
         )
         ensure_onnx_from_zip(det_path, det_url)
         ensure_onnx_from_zip(pose_path, pose_url)
@@ -133,11 +148,14 @@ class RTMPoseOnnxBackend:
                 backend=backend,
                 device=dev,
             )
+            if backend == "onnxruntime":
+                _apply_rtmlib_ort_options(self._det, sess_options)
+                _apply_rtmlib_ort_options(self._pose, sess_options)
 
         try:
             _load_models(device)
             if _is_cuda_device(device):
-                active = _ort_active_provider(det_path)
+                active = _ort_active_provider(det_path, sess_options)
                 if active != "CUDAExecutionProvider":
                     infer_log.warning(
                         f"⚠️ ORT 实际 EP={active}（期望 CUDAExecutionProvider），回退 CPU"
@@ -158,10 +176,19 @@ class RTMPoseOnnxBackend:
             self._pose = None
             _load_models(device)
 
-        infer_log.info(
-            f"✅ RTMDet-{self._det_variant.upper()} + RTMPose-{self._variant.upper()} ONNX 已就绪: "
-            f"det={det_path} pose={pose_path} device={device}"
-        )
+        if backend == "onnxruntime":
+            det_ep = self._det.session.get_providers()[0] if self._det else "?"
+            pose_ep = self._pose.session.get_providers()[0] if self._pose else "?"
+            infer_log.info(
+                f"✅ RTMDet-{self._det_variant.upper()} + RTMPose-{self._variant.upper()} ONNX 已就绪: "
+                f"det={det_path} pose={pose_path} device={device} "
+                f"ep=({det_ep},{pose_ep}) {ort_session_summary(sess_options)}"
+            )
+        else:
+            infer_log.info(
+                f"✅ RTMDet-{self._det_variant.upper()} + RTMPose-{self._variant.upper()} ONNX 已就绪: "
+                f"det={det_path} pose={pose_path} device={device}"
+            )
 
     def _detect_sync(self, frame) -> np.ndarray:
         boxes = self._det(frame)

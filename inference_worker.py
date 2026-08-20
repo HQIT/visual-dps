@@ -2,6 +2,19 @@
 
 import os
 
+from core.ort_runtime import apply_cpu_thread_env_defaults
+
+apply_cpu_thread_env_defaults()
+
+
+def _configure_opencv_threads() -> None:
+    try:
+        import cv2
+
+        cv2.setNumThreads(max(1, int(os.environ.get("OPENCV_NUM_THREADS", "1") or "1")))
+    except Exception:
+        pass
+
 
 def _preload_cuda_dlls_early() -> None:
     """GPU 容器：预加载 cuDNN 供 ORT；LD_LIBRARY_PATH 由 docker run 注入。"""
@@ -23,6 +36,7 @@ def _preload_cuda_dlls_early() -> None:
 
 
 _preload_cuda_dlls_early()
+_configure_opencv_threads()
 
 import asyncio
 import json

@@ -9,17 +9,22 @@ MANIFEST="${IMG_DIR}/images.manifest"
 
 [[ -f "${MANIFEST}" ]] || { echo "错误: 缺少 ${MANIFEST}" >&2; exit 1; }
 
+LIB="${PKG_ROOT}/scripts/lib/docker-cmd.sh"
+[[ -f "${LIB}" ]] || LIB="$(cd "${SCRIPT_DIR}/../lib" && pwd)/docker-cmd.sh"
+# shellcheck disable=SC1090
+source "${LIB}"
+
 load_one() {
   local tar_file="$1"
   local image_ref="$2"
   local path="${IMG_DIR}/${tar_file}"
   [[ -f "${path}" ]] || { echo "错误: 缺少 ${path}" >&2; exit 1; }
-  if docker image inspect "${image_ref}" >/dev/null 2>&1; then
+  if docker_cmd image inspect "${image_ref}" >/dev/null 2>&1; then
     echo "SKIP (已存在): ${image_ref}"
     return 0
   fi
   echo "==> docker load -i ${tar_file}  (${image_ref})"
-  docker load -i "${path}"
+  docker_cmd load -i "${path}"
 }
 
 echo "==> 加载分拆镜像 (${MANIFEST})"

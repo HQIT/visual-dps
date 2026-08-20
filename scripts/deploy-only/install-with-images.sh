@@ -20,6 +20,7 @@ while [[ $# -gt 0 ]]; do
 用法: ./install.sh [--host IP] [--weights-dir DIR] [--stop-infer] [--skip-load] [--worker-2]
 
   默认从 docker-images/*.tar 逐个 docker load，再启动 compose。
+  现场无 docker 组权限时脚本会自动使用 sudo docker（或 export VISUAL_DPS_DOCKER_SUDO=1）。
   --skip-load  镜像已 load 时跳过（须 ./verify-images.sh 通过）
   --worker-2   启 pick_state worker-2，不启 worker-1（勿双开）
 EOF
@@ -34,17 +35,12 @@ PKG_ROOT="${SCRIPT_DIR}"
 APP_DIR="${PKG_ROOT}/app"
 COMPOSE_FILE="${APP_DIR}/docker-compose.deploy.yml"
 [[ -f "${COMPOSE_FILE}" ]] || COMPOSE_FILE="${APP_DIR}/docker-compose.yml"
+export VISUAL_DPS_COMPOSE_FILE="${COMPOSE_FILE}"
 
-compose_cmd() {
-  if docker compose version >/dev/null 2>&1; then
-    docker compose -f "${COMPOSE_FILE}" "$@"
-  elif command -v docker-compose >/dev/null 2>&1; then
-    docker-compose -f "${COMPOSE_FILE}" "$@"
-  else
-    echo "错误: 需要 docker compose 或 docker-compose" >&2
-    exit 1
-  fi
-}
+LIB_DOCKER="${PKG_ROOT}/scripts/lib/docker-cmd.sh"
+[[ -f "${LIB_DOCKER}" ]] || LIB_DOCKER="$(cd "${SCRIPT_DIR}/../.." && pwd)/scripts/lib/docker-cmd.sh"
+# shellcheck disable=SC1090
+source "${LIB_DOCKER}"
 
 [[ -f "${APP_DIR}/.env" ]] || { echo "错误: 缺少 ${APP_DIR}/.env" >&2; exit 1; }
 
@@ -141,7 +137,9 @@ cd "${APP_DIR}"
 compose_cmd down 2>/dev/null || true
 
 if [[ "${STOP_INFER}" -eq 1 ]]; then
-  docker ps -a --format '{{.Names}}' | grep -E '^visual-dps-infer-' | xargs -r docker rm -f || true
+  while IFS= read -r name; do
+    [[ -n "${name}" ]] && docker_cmd rm -f "${name}" || true
+  done < <(docker_cmd ps -a --format '{{.Names}}' | grep -E '^visual-dps-infer-' || true)
 fi
 
 echo "==> 启动服务..."

@@ -27,6 +27,7 @@ EOF
 done
 
 [[ -f "${ENV_FILE}" ]] || { echo "错误: 缺少 ${ENV_FILE}" >&2; exit 1; }
+export VISUAL_DPS_PKG_ROOT="${PKG_ROOT}"
 set -a
 # shellcheck disable=SC1090
 source "${ENV_FILE}"

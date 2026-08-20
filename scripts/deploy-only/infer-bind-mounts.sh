@@ -3,6 +3,7 @@
 INFER_BIND_MOUNT_FILES=(
   inference_worker.py
   core/config.py
+  core/ort_runtime.py
   services/inference_service.py
   services/hwaccel_probe.py
   services/nvidia_pip_cuda.py

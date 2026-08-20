@@ -34,10 +34,21 @@ visual_dps_verify_deploy_images() {
   gpu="$(visual_dps_image_ref_from_env "${INFERENCE_LITE_GPU_IMAGE:-}" "visual-dps-inference-lite-gpu" "${tag}")"
   onnx="$(visual_dps_image_ref_from_env "${INFERENCE_LITE_GPU_ONNX_IMAGE:-}" "visual-dps-inference-lite-gpu-onnx" "${tag}")"
 
+  local lib_docker="${VISUAL_DPS_PKG_ROOT:-}/scripts/lib/docker-cmd.sh"
+  if [[ -f "${lib_docker}" ]]; then
+    # shellcheck disable=SC1090
+    source "${lib_docker}"
+  elif [[ -f "$(dirname "${BASH_SOURCE[0]}")/docker-cmd.sh" ]]; then
+    # shellcheck disable=SC1091
+    source "$(dirname "${BASH_SOURCE[0]}")/docker-cmd.sh"
+  else
+    docker_cmd() { docker "$@"; }
+  fi
+
   local fail=0
   _vdpi_check() {
     local img="$1"
-    if docker image inspect "${img}" >/dev/null 2>&1; then
+    if docker_cmd image inspect "${img}" >/dev/null 2>&1; then
       echo "OK: ${img}"
     else
       echo "FAIL: 缺少 ${img}" >&2

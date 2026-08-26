@@ -1,4 +1,4 @@
-"""Redis 姿态总线：Stream 队列（事件 Worker LB）+ Pub/Sub（UI 实时）。"""
+"""Redis 姿态总线：Stream 分片队列（事件 Worker）+ Pub/Sub（UI 实时）。"""
 
 from __future__ import annotations
 
@@ -11,13 +11,21 @@ from typing import Any
 
 import redis as sync_redis
 
+from services.event_engine.sharding import (
+    logical_shard_count,
+    logical_shard_id,
+    stream_key_for_camera,
+    stream_key_for_shard,
+    worker_owned_stream_keys,
+)
 from services.pipeline_log import log_pipeline_stage
 
 logger = logging.getLogger(__name__)
 
 POSE_CHANNEL_PREFIX = "pose:live:"
 POSE_SNAPSHOT_PREFIX = "pose:snapshot:"
-POSE_STREAM_KEY = os.environ.get("POSE_STREAM_KEY", "pose:stream")
+# 兼容旧引用：单 shard 或未分片时的默认键名
+POSE_STREAM_KEY = stream_key_for_shard(0)
 POSE_STREAM_GROUP = os.environ.get("POSE_STREAM_GROUP", "event-workers")
 POSE_STREAM_MAXLEN = max(100, int(os.environ.get("POSE_STREAM_MAXLEN", "2000")))
 POSE_SCHEMA_VERSION = 1
@@ -39,8 +47,13 @@ def snapshot_key_for(camera_id: str) -> str:
 
 
 def pose_delivery_mode() -> str:
-    """stream = Redis Stream 竞争消费；pubsub = 仅 Pub/Sub（旧行为）。"""
+    """stream = Redis Stream 分片队列；pubsub = 仅 Pub/Sub（旧行为）。"""
     return os.environ.get("POSE_DELIVERY", "stream").strip().lower() or "stream"
+
+
+def all_pose_stream_keys() -> list[str]:
+    """全部 logical shard 对应的 Stream 键（监控/拓扑用）。"""
+    return [stream_key_for_shard(i) for i in range(logical_shard_count())]
 
 
 def build_pose_frame(
@@ -68,16 +81,36 @@ def build_pose_frame(
     return frame
 
 
-def ensure_pose_stream_group(client: sync_redis.Redis | None = None) -> None:
+def ensure_pose_stream_group(
+    stream_key: str | None = None,
+    client: sync_redis.Redis | None = None,
+) -> None:
+    own = client is None
+    if own:
+        client = sync_redis.from_url(redis_url(), decode_responses=True)
+    key = stream_key or POSE_STREAM_KEY
+    try:
+        client.xgroup_create(key, POSE_STREAM_GROUP, id="0", mkstream=True)
+        logger.info("Created pose stream group %s on %s", POSE_STREAM_GROUP, key)
+    except sync_redis.ResponseError as exc:
+        if "BUSYGROUP" not in str(exc):
+            raise
+    finally:
+        if own and client is not None:
+            client.close()
+
+
+def ensure_pose_stream_groups(
+    stream_keys: list[str] | None = None,
+    client: sync_redis.Redis | None = None,
+) -> None:
+    keys = stream_keys if stream_keys is not None else worker_owned_stream_keys()
     own = client is None
     if own:
         client = sync_redis.from_url(redis_url(), decode_responses=True)
     try:
-        client.xgroup_create(POSE_STREAM_KEY, POSE_STREAM_GROUP, id="0", mkstream=True)
-        logger.info("Created pose stream group %s on %s", POSE_STREAM_GROUP, POSE_STREAM_KEY)
-    except sync_redis.ResponseError as exc:
-        if "BUSYGROUP" not in str(exc):
-            raise
+        for key in keys:
+            ensure_pose_stream_group(key, client=client)
     finally:
         if own and client is not None:
             client.close()
@@ -104,12 +137,13 @@ def publish_pose_frame(
         run_id=run_id,
     )
     payload = json.dumps(frame, ensure_ascii=False, separators=(",", ":"))
+    stream_key = stream_key_for_camera(cid)
     try:
         client = sync_redis.from_url(redis_url(), decode_responses=True)
         pipe = client.pipeline(transaction=False)
         if pose_delivery_mode() == "stream":
             pipe.xadd(
-                POSE_STREAM_KEY,
+                stream_key,
                 {"payload": payload},
                 maxlen=POSE_STREAM_MAXLEN,
                 approximate=True,
@@ -125,6 +159,8 @@ def publish_pose_frame(
             run_id=run_id or None,
             persons=len(persons),
             delivery=pose_delivery_mode(),
+            stream_key=stream_key,
+            logical_shard=logical_shard_id(cid),
         )
         return True
     except Exception as exc:
@@ -133,13 +169,14 @@ def publish_pose_frame(
 
 
 def list_recent_pose_frames(camera_id: str, *, limit: int = 8) -> list[dict[str, Any]]:
-    """从 pose:stream 取某路最近若干帧（新→旧）。"""
+    """从该 camera 所属 shard 的 Stream 取最近若干帧（新→旧）。"""
     cid = str(camera_id or "").strip()
     if not cid or limit < 1:
         return []
+    stream_key = stream_key_for_camera(cid)
     try:
         client = sync_redis.from_url(redis_url(), decode_responses=True)
-        rows = client.xrevrange(POSE_STREAM_KEY, count=max(limit * 6, 24))
+        rows = client.xrevrange(stream_key, count=max(limit * 6, 24))
         client.close()
     except Exception as exc:
         logger.warning("Redis list_recent_pose_frames failed camera=%s: %s", cid, exc)

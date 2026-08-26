@@ -23,7 +23,7 @@ from services.event_engine.event_log import (
     format_event_log_line,
     prefilter_log_enabled,
 )
-from services.event_engine.sharding import owns_camera, shard_config, shard_label
+from services.event_engine.sharding import owns_camera, shard_label, worker_owned_stream_keys
 from services.pipeline_log import (
     get_collision_logger,
     get_prefilter_logger,
@@ -33,9 +33,8 @@ from services.pipeline_log import (
 from services.pose_bus import (
     POSE_CHANNEL_PREFIX,
     POSE_STREAM_GROUP,
-    POSE_STREAM_KEY,
     default_consumer_name,
-    ensure_pose_stream_group,
+    ensure_pose_stream_groups,
     pose_delivery_mode,
     redis_url,
 )
@@ -89,7 +88,7 @@ class EventRedisWorker:
         except OSError:
             self._runtime_settings_mtime = 0.0
         self._delivery = pose_delivery_mode()
-        self._shard_count, self._shard_index = shard_config()
+        self._owned_stream_keys = worker_owned_stream_keys()
         self._consumer_name = default_consumer_name()
         self._listener_task: asyncio.Task | None = None
         self._redis: aioredis.Redis | None = None
@@ -321,32 +320,38 @@ class EventRedisWorker:
 
     async def _stream_loop(self) -> None:
         block_ms = max(500, int(os.environ.get("POSE_STREAM_BLOCK_MS", "2000")))
+        stream_keys = self._owned_stream_keys
+        if not stream_keys:
+            logger.error("EventRedisWorker: no owned pose streams configured")
+            return
         while True:
             try:
-                await asyncio.to_thread(ensure_pose_stream_group)
+                await asyncio.to_thread(ensure_pose_stream_groups, stream_keys)
                 self._redis = aioredis.from_url(redis_url(), decode_responses=True)
                 logger.info(
-                    "EventRedisWorker stream consumer=%s group=%s key=%s",
+                    "EventRedisWorker stream consumer=%s group=%s streams=%s (%s)",
                     self._consumer_name,
                     POSE_STREAM_GROUP,
-                    POSE_STREAM_KEY,
+                    stream_keys,
+                    shard_label(),
                 )
+                read_streams = {key: ">" for key in stream_keys}
                 while True:
                     messages = await self._redis.xreadgroup(
                         POSE_STREAM_GROUP,
                         self._consumer_name,
-                        {POSE_STREAM_KEY: ">"},
+                        read_streams,
                         count=1,
                         block=block_ms,
                     )
                     if not messages:
                         continue
-                    for _stream, items in messages:
+                    for stream_name, items in messages:
                         for msg_id, fields in items:
                             payload = fields.get("payload") if isinstance(fields, dict) else None
                             if payload:
                                 await self._handle_pose_payload(payload)
-                            await self._redis.xack(POSE_STREAM_KEY, POSE_STREAM_GROUP, msg_id)
+                            await self._redis.xack(stream_name, POSE_STREAM_GROUP, msg_id)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -408,9 +413,7 @@ class EventRedisWorker:
         camera_id = str(pose.get("camera_id") or "").strip()
         if not camera_id:
             return
-        if self._delivery != "stream" and not owns_camera(
-            camera_id, self._shard_count, self._shard_index
-        ):
+        if not owns_camera(camera_id):
             return
 
         infer_w = int(pose.get("infer_width") or 0)

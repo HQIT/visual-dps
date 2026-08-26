@@ -30,7 +30,7 @@ async def _run():
 
     worker = EventRedisWorker(app_config, callback_reporter=reporter)
     await worker.start()
-    from services.pose_bus import POSE_STREAM_GROUP, POSE_STREAM_KEY, pose_delivery_mode
+    from services.pose_bus import POSE_STREAM_GROUP, pose_delivery_mode
 
     boot = get_boot_logger()
     instance_id = os.environ.get("EVENT_WORKER_INSTANCE_ID", "").strip() or os.environ.get("HOSTNAME", "")
@@ -38,8 +38,8 @@ async def _run():
     if delivery == "stream":
         boot.info(
             f"ℹ️ Event worker 已启动 delivery=stream "
-            f"key={POSE_STREAM_KEY} group={POSE_STREAM_GROUP} "
-            f"consumer={worker._consumer_name} id={instance_id or 'local'}"
+            f"streams={worker._owned_stream_keys} group={POSE_STREAM_GROUP} "
+            f"consumer={worker._consumer_name} ({shard_label()}) id={instance_id or 'local'}"
         )
     else:
         boot.info(f"ℹ️ Event worker 已启动 delivery=pubsub ({shard_label()}) id={instance_id or 'local'}")

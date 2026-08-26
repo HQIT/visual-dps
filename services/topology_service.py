@@ -25,11 +25,13 @@ from services.mediamtx_service import (
     _mediamtx_api,
     build_camera_playback_urls,
 )
+from services.event_engine.sharding import logical_shard_id, worker_owned_stream_keys
 from services.pose_bus import (
     POSE_STREAM_GROUP,
-    POSE_STREAM_KEY,
+    all_pose_stream_keys,
     get_pose_snapshot,
     list_recent_pose_frames,
+    stream_key_for_camera,
 )
 
 POLL_RECOMMENDED_MS = 10000
@@ -723,11 +725,13 @@ def build_topology_overview(
                     direction="push",
                     protocol="redis_stream",
                     role="pose",
-                    endpoint=f"{redis_masked} · XADD {POSE_STREAM_KEY}",
+                    endpoint=f"{redis_masked} · XADD {stream_key_for_camera(cid)}",
                     health=pose_edge_health,
                     meta={
                         "pose_age_sec": last_pose_age_sec,
                         "pose_frozen": bool(pose_status.get("frozen")),
+                        "logical_shard": logical_shard_id(cid),
+                        "stream_key": stream_key_for_camera(cid),
                     },
                 )
             )
@@ -781,7 +785,9 @@ def build_topology_overview(
                     "gpu": gpu_meta,
                     "pose_publish": {
                         "delivery": os.environ.get("POSE_DELIVERY", "stream"),
-                        "stream_key": POSE_STREAM_KEY,
+                        "stream_key": stream_key_for_camera(cid),
+                        "logical_shard": logical_shard_id(cid),
+                        "stream_keys": all_pose_stream_keys(),
                         "group": POSE_STREAM_GROUP,
                     },
                 },
@@ -808,7 +814,7 @@ def build_topology_overview(
                 direction="pull",
                 protocol="redis_stream",
                 role="event",
-                endpoint=f"XREADGROUP {POSE_STREAM_GROUP} · {POSE_STREAM_KEY}",
+                endpoint=f"XREADGROUP {POSE_STREAM_GROUP} · {','.join(worker_owned_stream_keys())}",
                 health=ew_health,
             )
         )

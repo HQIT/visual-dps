@@ -25,7 +25,7 @@ if str(ROOT) not in sys.path:
 import redis as sync_redis
 
 from services.event_bus import get_event_snapshot, snapshot_key_for
-from services.pose_bus import POSE_STREAM_KEY, build_pose_frame, ensure_pose_stream_group, redis_url
+from services.pose_bus import build_pose_frame, ensure_pose_stream_group, redis_url, stream_key_for_camera
 
 
 CAMERA_ID = "ew2-smoke"
@@ -59,7 +59,8 @@ def _xadd_pose(client: sync_redis.Redis, frame_idx: int, inside: bool) -> str:
         infer_height=IH,
     )
     payload = json.dumps(frame, ensure_ascii=False, separators=(",", ":"))
-    return client.xadd(POSE_STREAM_KEY, {"payload": payload})
+    stream_key = stream_key_for_camera(CAMERA_ID)
+    return client.xadd(stream_key, {"payload": payload})
 
 
 def main() -> int:
@@ -70,7 +71,8 @@ def main() -> int:
     args = ap.parse_args()
 
     url = redis_url()
-    print(f"[smoke] redis={url} stream={POSE_STREAM_KEY} camera={CAMERA_ID}")
+    stream_key = stream_key_for_camera(CAMERA_ID)
+    print(f"[smoke] redis={url} stream={stream_key} camera={CAMERA_ID}")
     client = sync_redis.from_url(url, decode_responses=True)
     try:
         client.ping()
@@ -78,7 +80,7 @@ def main() -> int:
         print(f"[smoke] redis ping failed: {exc}", file=sys.stderr)
         return 2
 
-    ensure_pose_stream_group(client)
+    ensure_pose_stream_group(stream_key, client=client)
 
     # 清掉旧 snapshot，避免误判
     client.delete(snapshot_key_for(CAMERA_ID))

@@ -401,7 +401,8 @@ def start_inference_container(camera: dict, request=None) -> dict:
         "RTSP_FRAME_BUFFER_TTL_SEC": os.environ.get("RTSP_FRAME_BUFFER_TTL_SEC", "1").strip() or "1",
         # 与 event-worker 的 POSE_DELIVERY=stream 对齐（推理 XADD pose:stream）
         "POSE_DELIVERY": os.environ.get("POSE_DELIVERY", "stream").strip() or "stream",
-        "POSE_STREAM_KEY": os.environ.get("POSE_STREAM_KEY", "pose:stream"),
+        "POSE_LOGICAL_SHARD_COUNT": os.environ.get("POSE_LOGICAL_SHARD_COUNT", "16"),
+        "POSE_STREAM_KEY_PREFIX": os.environ.get("POSE_STREAM_KEY_PREFIX", "pose:stream"),
         "POSE_STREAM_GROUP": os.environ.get("POSE_STREAM_GROUP", "event-workers"),
         "POSE_STREAM_MAXLEN": os.environ.get("POSE_STREAM_MAXLEN", "2000"),
     }

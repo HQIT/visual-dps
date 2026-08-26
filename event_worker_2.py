@@ -1,6 +1,6 @@
-"""事件 Worker-2：pick_state 算法；与 worker-1 共用 pose:stream / event-workers。
+"""Event Worker-2：pick_state 算法；按 logical shard 消费 pose:stream:{id}。
 
-对照时只启停其中一个服务，勿双开抢同一 group。
+与 worker-1 二选一（或双 worker-2 各负责不同 shard 区间）。同一 shard 勿双 consumer。
 """
 
 import asyncio
@@ -54,7 +54,7 @@ async def _run():
 
     worker = PickStateRedisWorker(app_config, callback_reporter=reporter)
     await worker.start()
-    from services.pose_bus import POSE_STREAM_GROUP, POSE_STREAM_KEY, pose_delivery_mode
+    from services.pose_bus import POSE_STREAM_GROUP, pose_delivery_mode
 
     instance_id = (
         os.environ.get("EVENT_WORKER_INSTANCE_ID", "").strip()
@@ -65,11 +65,10 @@ async def _run():
     if delivery == "stream":
         print(
             f"ℹ️ Event worker-2 已启动 delivery=stream pick_state={cfg} "
-            f"key={POSE_STREAM_KEY} group={POSE_STREAM_GROUP} "
-            f"consumer={worker._consumer_name} id={instance_id or 'local'} "
-            f"callbacks={'on' if enable_cb else 'off'}"
+            f"streams={worker._owned_stream_keys} group={POSE_STREAM_GROUP} "
+            f"consumer={worker._consumer_name} ({shard_label()}) "
+            f"id={instance_id or 'local'} callbacks={'on' if enable_cb else 'off'}"
         )
-        print("⚠️ 与 visual-dps-event-worker 共用 group；对照时请只启动其中一个")
     else:
         print(
             f"ℹ️ Event worker-2 已启动 delivery=pubsub ({shard_label()}) "

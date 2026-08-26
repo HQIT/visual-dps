@@ -370,6 +370,7 @@ def start_inference_container(camera: dict, request=None) -> dict:
             "services/inference_backends/rtmpose_onnx_backend.py",
             "services/pipeline_log.py",
             "services/pose_bus.py",
+            "services/event_engine/sharding.py",
             "services/inference_backends/onnx_assets.py",
             "services/inference_backends/yolo_pose_backend.py",
             "services/runtime_config_service.py",

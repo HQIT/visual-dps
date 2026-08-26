@@ -25,7 +25,11 @@ from services.mediamtx_service import (
     _mediamtx_api,
     build_camera_playback_urls,
 )
-from services.event_engine.sharding import logical_shard_id, worker_owned_stream_keys
+from services.event_engine.sharding import (
+    logical_shard_id,
+    worker_owned_shard_ids,
+    worker_owned_stream_keys,
+)
 from services.pose_bus import (
     POSE_STREAM_GROUP,
     all_pose_stream_keys,
@@ -43,8 +47,17 @@ _TOPOLOGY_POSE_STALE_SEC = max(
 _COMPOSE_CONTAINERS = (
     ("visual-dps-mediamtx", "mediamtx", "mediamtx"),
     ("visual-dps-redis", "redis", "redis"),
+    ("visual-dps-event-worker-2", "event_worker", "event-worker-2"),
+    ("visual-dps-event-worker-2-b", "event_worker", "event-worker-2-b"),
     ("visual-dps-event-worker", "event_worker", "event-worker"),
     ("visual-dps-ui", "ui", "ui"),
+)
+
+# 先 worker-2（含 dual），再 worker-1；拓扑按实际在跑的实例展示
+_EVENT_WORKER_SPECS = (
+    ("visual-dps-event-worker-2", "event-worker-2"),
+    ("visual-dps-event-worker-2-b", "event-worker-2-b"),
+    ("visual-dps-event-worker", "event-worker"),
 )
 
 
@@ -187,6 +200,71 @@ def _get_compose_container(name: str):
         return _docker_client().containers.get(name)
     except Exception:
         return None
+
+
+def _container_env_map(container) -> dict[str, str]:
+    out: dict[str, str] = {}
+    try:
+        for item in (container.attrs.get("Config") or {}).get("Env") or []:
+            if not isinstance(item, str) or "=" not in item:
+                continue
+            key, value = item.split("=", 1)
+            out[key] = value
+    except Exception:
+        pass
+    return out
+
+
+def _discover_event_workers() -> list[dict[str, Any]]:
+    """返回实际存在的 event-worker 容器；worker-2 在跑时忽略已退出的 worker-1。"""
+    found: list[dict[str, Any]] = []
+    for container_name, node_id in _EVENT_WORKER_SPECS:
+        container = _get_compose_container(container_name)
+        if container is None:
+            continue
+        env = _container_env_map(container)
+        host, ip = _container_network(container)
+        found.append(
+            {
+                "container_name": container_name,
+                "node_id": node_id,
+                "container": container,
+                "running": container.status == "running",
+                "env": env,
+                "shards": worker_owned_shard_ids(env),
+                "stream_keys": worker_owned_stream_keys(env),
+                "consumer_name": env.get("EVENT_WORKER_CONSUMER_NAME")
+                or env.get("HOSTNAME")
+                or container_name,
+                "host": host,
+                "ip": ip,
+            }
+        )
+
+    worker2_running = any(
+        w["running"] and w["container_name"].startswith("visual-dps-event-worker-2")
+        for w in found
+    )
+    if worker2_running:
+        found = [
+            w
+            for w in found
+            if w["container_name"] != "visual-dps-event-worker" or w["running"]
+        ]
+    return found
+
+
+def _event_worker_for_camera(
+    workers: list[dict[str, Any]], camera_id: str
+) -> dict[str, Any] | None:
+    if not workers:
+        return None
+    sid = logical_shard_id(camera_id)
+    for worker in workers:
+        if sid in (worker.get("shards") or []):
+            return worker
+    running = [w for w in workers if w.get("running")]
+    return running[0] if running else workers[0]
 
 
 def _mediamtx_paths_map() -> tuple[dict[str, dict], bool, str]:
@@ -368,8 +446,8 @@ def build_topology_overview(
 
     mtx_container = _get_compose_container("visual-dps-mediamtx") if docker_ok else None
     redis_container = _get_compose_container("visual-dps-redis") if docker_ok else None
-    ew_container = _get_compose_container("visual-dps-event-worker") if docker_ok else None
     ui_container = _get_compose_container("visual-dps-ui") if docker_ok else None
+    event_workers = _discover_event_workers() if docker_ok else []
 
     mtx_host, mtx_ip = _container_network(mtx_container) if mtx_container else ("mediamtx", "")
     mtx_ports = _container_ports(mtx_container) if mtx_container else []
@@ -412,23 +490,53 @@ def build_topology_overview(
         ports=_container_ports(redis_container) if redis_container else [],
     )
 
-    ew_host, ew_ip = _container_network(ew_container) if ew_container else ("", "")
-    ew_health = "ok" if ew_container and ew_container.status == "running" else "unknown"
-    if docker_ok and not ew_container:
-        ew_health = "error"
-        issues.append(_issue("EVENT_WORKER_DOWN", "error", "未找到 event-worker 容器"))
-    elif ew_container and ew_container.status != "running":
-        ew_health = "error"
-        issues.append(_issue("EVENT_WORKER_DOWN", "error", f"event-worker 状态: {ew_container.status}"))
-    nodes["event-worker"] = _node(
-        id="event-worker",
-        kind="event_worker",
-        label="visual-dps-event-worker",
-        health=ew_health,
-        host="visual-dps-event-worker",
-        hostname=ew_host,
-        ip=ew_ip,
-    )
+    running_workers = [w for w in event_workers if w["running"]]
+    if docker_ok and not running_workers:
+        issues.append(
+            _issue(
+                "EVENT_WORKER_DOWN",
+                "error",
+                "未找到运行中的 event-worker（worker-2 / worker-1）",
+            )
+        )
+        if not event_workers:
+            nodes["event-worker"] = _node(
+                id="event-worker",
+                kind="event_worker",
+                label="event-worker (未运行)",
+                health="error",
+                host="",
+            )
+    for worker in event_workers:
+        node_health = "ok" if worker["running"] else "error"
+        if worker["running"] is False:
+            issues.append(
+                _issue(
+                    "EVENT_WORKER_DOWN",
+                    "error",
+                    f"{worker['container_name']} 状态: {worker['container'].status}",
+                )
+            )
+        shard_meta = worker["shards"]
+        if shard_meta:
+            shard_label = f"{shard_meta[0]}-{shard_meta[-1]}" if len(shard_meta) > 1 else str(shard_meta[0])
+        else:
+            shard_label = "none"
+        nodes[worker["node_id"]] = _node(
+            id=worker["node_id"],
+            kind="event_worker",
+            label=worker["container_name"],
+            health=node_health,
+            host=worker["container_name"],
+            hostname=worker["host"],
+            ip=worker["ip"],
+            meta={
+                "shards": shard_meta,
+                "shard_label": shard_label,
+                "consumer_name": worker["consumer_name"],
+                "stream_keys": worker["stream_keys"],
+            },
+        )
 
     ui_host, ui_ip = _container_network(ui_container) if ui_container else ("", "")
     nodes["ui"] = _node(
@@ -750,6 +858,7 @@ def build_topology_overview(
             )
         )
 
+        owner = _event_worker_for_camera(event_workers, cid)
         paths_out.append(
             {
                 "camera_id": cid,
@@ -792,13 +901,13 @@ def build_topology_overview(
                     },
                 },
                 "event": {
-                    "worker_container": "visual-dps-event-worker",
+                    "worker_container": (owner["container_name"] if owner else ""),
                     "consumer_group": POSE_STREAM_GROUP,
-                    "consumer_name": os.environ.get(
-                        "EVENT_WORKER_CONSUMER_NAME", "event-worker-1"
-                    ),
+                    "consumer_name": (owner["consumer_name"] if owner else ""),
                     "redis_url": redis_masked,
                     "last_pose_age_sec": last_pose_age_sec,
+                    "logical_shard": logical_shard_id(cid),
+                    "stream_key": stream_key_for_camera(cid),
                 },
                 "health": path_health,
                 "issues": path_issues,
@@ -806,18 +915,27 @@ def build_topology_overview(
         )
 
     if paths_out:
-        edges.append(
-            _edge(
-                id="e:redis->event-worker",
-                from_id="redis",
-                to_id="event-worker",
-                direction="pull",
-                protocol="redis_stream",
-                role="event",
-                endpoint=f"XREADGROUP {POSE_STREAM_GROUP} · {','.join(worker_owned_stream_keys())}",
-                health=ew_health,
+        for worker in event_workers:
+            keys = worker.get("stream_keys") or []
+            key_preview = ",".join(keys[:4])
+            if len(keys) > 4:
+                key_preview += f",…(+{len(keys) - 4})"
+            edges.append(
+                _edge(
+                    id=f"e:redis->{worker['node_id']}",
+                    from_id="redis",
+                    to_id=worker["node_id"],
+                    direction="pull",
+                    protocol="redis_stream",
+                    role="event",
+                    endpoint=f"XREADGROUP {POSE_STREAM_GROUP} · {key_preview or '—'}",
+                    health="ok" if worker["running"] else "error",
+                    meta={
+                        "shards": worker.get("shards") or [],
+                        "container": worker["container_name"],
+                    },
+                )
             )
-        )
 
     # 去重 issues（同 code+camera_id）
     seen: set[tuple[str, str]] = set()

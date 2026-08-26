@@ -66,12 +66,13 @@ def shard_config() -> tuple[int, int]:
     return count, index
 
 
-def worker_owned_shard_ids() -> list[int]:
+def worker_owned_shard_ids(environ: dict[str, str] | None = None) -> list[int]:
     """本 worker 负责的 logical shard 列表（shard → worker 动态映射）。"""
+    env = environ if environ is not None else os.environ
     n = logical_shard_count()
 
-    start_s = os.environ.get("EVENT_WORKER_SHARD_START", "").strip()
-    end_s = os.environ.get("EVENT_WORKER_SHARD_END", "").strip()
+    start_s = str(env.get("EVENT_WORKER_SHARD_START", "") or "").strip()
+    end_s = str(env.get("EVENT_WORKER_SHARD_END", "") or "").strip()
     if start_s != "" and end_s != "":
         try:
             start = int(start_s)
@@ -82,7 +83,7 @@ def worker_owned_shard_ids() -> list[int]:
         end = max(start, min(end, n - 1))
         return list(range(start, end + 1))
 
-    ids_s = os.environ.get("EVENT_WORKER_SHARD_IDS", "").strip()
+    ids_s = str(env.get("EVENT_WORKER_SHARD_IDS", "") or "").strip()
     if ids_s:
         out: list[int] = []
         for part in ids_s.split(","):
@@ -97,15 +98,16 @@ def worker_owned_shard_ids() -> list[int]:
                 out.append(sid)
         return sorted(set(out))
 
-    worker_count, worker_index = shard_config()
-    if worker_count > 1 and n > 1:
-        return [s for s in range(n) if s % worker_count == worker_index]
+    if environ is None:
+        worker_count, worker_index = shard_config()
+        if worker_count > 1 and n > 1:
+            return [s for s in range(n) if s % worker_count == worker_index]
 
     return list(range(n))
 
 
-def worker_owned_stream_keys() -> list[str]:
-    return [stream_key_for_shard(s) for s in worker_owned_shard_ids()]
+def worker_owned_stream_keys(environ: dict[str, str] | None = None) -> list[str]:
+    return [stream_key_for_shard(s) for s in worker_owned_shard_ids(environ)]
 
 
 def owns_camera(

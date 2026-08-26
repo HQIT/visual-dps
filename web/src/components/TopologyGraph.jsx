@@ -25,6 +25,9 @@ function nodeSubtitle(node) {
     if (st === 'stopped' || !st) return '检测未启动';
     if (st === 'starting') return '启动中';
   }
+  if (node.kind === 'event_worker' && node.meta?.shard_label) {
+    return `shard ${node.meta.shard_label}`;
+  }
   const parts = [];
   if (node.hostname) parts.push(node.hostname);
   if (node.ip) parts.push(node.ip);

@@ -2,7 +2,7 @@
 export function edgeBelongsToCamera(edge, cameraId) {
   if (!cameraId) return true;
   const id = String(edge?.id || '');
-  if (id === 'e:redis->event-worker') return true;
+  if (id.startsWith('e:redis->event-worker')) return true;
   const metaCid = edge?.meta?.camera_id;
   if (metaCid != null && metaCid !== '') {
     return String(metaCid) === cameraId;

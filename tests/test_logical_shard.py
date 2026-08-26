@@ -48,6 +48,18 @@ class LogicalShardTests(unittest.TestCase):
         os.environ["EVENT_WORKER_SHARD_END"] = "7"
         self.assertEqual(sharding.worker_owned_shard_ids(), list(range(8)))
 
+    def test_worker_owned_shard_ids_from_env_dict(self) -> None:
+        os.environ["POSE_LOGICAL_SHARD_COUNT"] = "16"
+        os.environ.pop("EVENT_WORKER_SHARD_START", None)
+        os.environ.pop("EVENT_WORKER_SHARD_END", None)
+        ids = sharding.worker_owned_shard_ids(
+            {
+                "EVENT_WORKER_SHARD_START": "8",
+                "EVENT_WORKER_SHARD_END": "15",
+            }
+        )
+        self.assertEqual(ids, list(range(8, 16)))
+
     def test_owns_camera_by_logical_shard(self) -> None:
         os.environ["POSE_LOGICAL_SHARD_COUNT"] = "16"
         os.environ["EVENT_WORKER_SHARD_START"] = "0"
